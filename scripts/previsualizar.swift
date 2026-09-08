@@ -43,7 +43,19 @@ MainActor.assumeIsolated {
     let fondo = Color(nsColor: .windowBackgroundColor)
     guardar(VistaPrincipal(co: co, prefs: prefs), "panel", en: salida)
     guardar(VistaArbol(co: co, plano: true).frame(width: esc(420)).background(fondo), "arbol", en: salida)
-    guardar(VistaHistorico(co: co, plano: true).frame(width: esc(420)).background(fondo), "historico", en: salida)
+    guardar(VistaHistorico(co: co, plano: true)
+                .frame(width: esc(420), height: esc(430)).background(fondo), "historico", en: salida)
+
+    // Con una tarjeta fijada, para comprobar que flota sobre todo y no corre nada.
+    let demo = DatosTarjeta(
+        id: "demo",
+        ancla: CGRect(x: esc(180), y: esc(90), width: esc(8), height: esc(40)),
+        titulo: "3 de sep", valor: "285,7 M tokens", color: Paleta.acento,
+        filas: [.init(k: "Entrada", v: "12,4 K"), .init(k: "Salida", v: "1,1 M"),
+                .init(k: "Caché escrita", v: "8,9 M"), .init(k: "Caché leída", v: "275,7 M"),
+                .init(k: "Mensajes", v: "1.204")])
+    guardar(VistaHistorico(co: co, plano: true, demo: demo)
+                .frame(width: esc(420), height: esc(430)).background(fondo), "historico-tarjeta", en: salida)
     guardar(VistaAjustes(co: co, prefs: prefs).background(fondo), "ajustes", en: salida)
     guardar(EtiquetaBarra(lineas: co.lineasBarra(prefs), conIcono: true)
                 .padding(6).background(fondo), "barra", en: salida)

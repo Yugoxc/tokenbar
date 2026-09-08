@@ -1,66 +1,135 @@
 import SwiftUI
 
+/// Lo que muestra la tarjeta flotante, más el rectángulo del elemento que la
+/// disparó (en coordenadas de la vista) para poder ubicarla sin tapar el mouse.
+struct DatosTarjeta: Equatable {
+    struct Fila: Equatable { let k: String; let v: String }
+
+    var id: String
+    var ancla: CGRect
+    var titulo: String
+    var valor: String
+    var color: Color
+    var filas: [Fila]
+}
+
+private let espacio = "historico"
+
 struct VistaHistorico: View {
     @ObservedObject var co: Coordinador
-    /// Ver `VistaArbol.plano`.
+    /// Sin ScrollView: solo para las previsualizaciones a PNG del script de
+    /// desarrollo, que no saben dibujar contenido dentro de un ScrollView.
     var plano = false
+    /// Tarjeta fijada a mano, solo para las previsualizaciones: el hover no se
+    /// puede simular al renderizar a PNG.
+    var demo: DatosTarjeta?
+
+    @State private var tarjeta: DatosTarjeta?
+    @State private var tamTarjeta: CGSize = .zero
 
     var body: some View {
-        if plano { contenido } else { ScrollView { contenido } }
+        GeometryReader { g in
+            ZStack(alignment: .topLeading) {
+                if plano { contenido } else { ScrollView { contenido } }
+
+                // La tarjeta vive acá, fuera del gráfico: así se dibuja sobre
+                // todo lo demás y no corre ni un pixel del resto del panel.
+                if let t = tarjeta {
+                    TarjetaFlotante(datos: t)
+                        .background(medidor)
+                        .offset(x: x(t, en: g.size), y: y(t, en: g.size))
+                        .opacity(tamTarjeta == .zero ? 0 : 1)
+                        .allowsHitTesting(false)
+                        .zIndex(100)
+                }
+            }
+            .coordinateSpace(name: espacio)
+            .onAppear { if let demo { tarjeta = demo } }
+        }
     }
 
     private var contenido: some View {
         VStack(alignment: .leading, spacing: 16) {
-                Seccion(titulo: "Tokens por día")
-                BarrasPorDia(datos: co.porDia)
+            Seccion(titulo: "Tokens por día")
+            BarrasPorDia(datos: co.porDia, tarjeta: $tarjeta)
 
-                Seccion(titulo: "Por modelo")
-                BarraModelos(datos: co.porModelo)
+            Seccion(titulo: "Por modelo")
+            BarraModelos(datos: co.porModelo, tarjeta: $tarjeta)
 
-                Seccion(titulo: "Histórico de límites")
-                if co.historial.count < 2 {
-                    Text("Se va llenando a medida que el app observa cambios de porcentaje.")
-                        .font(fuente(10))
-                        .foregroundStyle(.tertiary)
-                        .fixedSize(horizontal: false, vertical: true)
-                } else {
-                    SerieLimites(muestras: co.historial)
-                }
+            Seccion(titulo: "Histórico de límites")
+            if co.historial.count < 2 {
+                Text("Se va llenando a medida que el app observa cambios de porcentaje.")
+                    .font(fuente(10))
+                    .foregroundStyle(.tertiary)
+                    .fixedSize(horizontal: false, vertical: true)
+            } else {
+                SerieLimites(muestras: co.historial, tarjeta: $tarjeta)
+            }
         }
         .padding(10)
     }
-}
 
-// MARK: - Tarjeta flotante
+    private var medidor: some View {
+        GeometryReader { g in
+            Color.clear.preference(key: ClaveTam.self, value: g.size)
+        }
+        .onPreferenceChange(ClaveTam.self) { tamTarjeta = $0 }
+    }
 
-/// Tarjeta que aparece sobre el gráfico al pasar el mouse. Evita tener que
-/// mostrar una tabla completa: la info vive en el hover y no ocupa pantalla.
-private struct Tarjeta<Contenido: View>: View {
-    @ViewBuilder let contenido: Contenido
+    // MARK: - Ubicación
 
-    var body: some View {
-        VStack(alignment: .leading, spacing: 2) { contenido }
-            .padding(.horizontal, 8)
-            .padding(.vertical, 6)
-            .background(
-                RoundedRectangle(cornerRadius: 6)
-                    .fill(.regularMaterial)
-                    .shadow(color: .black.opacity(0.22), radius: 6, y: 2)
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: 6).stroke(Color.primary.opacity(0.10))
-            )
-            .fixedSize()
-            .allowsHitTesting(false)      // que no robe el hover de las barras
+    /// Centrada sobre el elemento, sin salirse por los lados.
+    private func x(_ t: DatosTarjeta, en tam: CGSize) -> CGFloat {
+        let ideal = t.ancla.midX - tamTarjeta.width / 2
+        return min(max(ideal, 4), max(tam.width - tamTarjeta.width - 4, 4))
+    }
+
+    /// Encima del elemento apuntado; si no cabe arriba, debajo. Nunca sobre el
+    /// propio elemento, que es donde está el cursor.
+    private func y(_ t: DatosTarjeta, en tam: CGSize) -> CGFloat {
+        let arriba = t.ancla.minY - tamTarjeta.height - 10
+        if arriba >= 4 { return arriba }
+        let abajo = t.ancla.maxY + 10
+        return min(abajo, max(tam.height - tamTarjeta.height - 4, 4))
     }
 }
 
-@MainActor
-private func filaDato(_ k: String, _ v: String) -> some View {
-    HStack(spacing: 8) {
-        Text(k).font(fuente(9)).foregroundStyle(.secondary)
-        Spacer(minLength: 10)
-        Text(v).font(fuente(9, .medium, mono: true))
+private struct ClaveTam: PreferenceKey {
+    static let defaultValue = CGSize.zero
+    static func reduce(value: inout CGSize, nextValue: () -> CGSize) { value = nextValue() }
+}
+
+// MARK: - Tarjeta
+
+private struct TarjetaFlotante: View {
+    let datos: DatosTarjeta
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(datos.titulo).font(fuente(10, .semibold))
+            Text(datos.valor)
+                .font(fuente(10, .medium, mono: true))
+                .foregroundStyle(datos.color)
+            if !datos.filas.isEmpty {
+                Divider().padding(.vertical, 1)
+                ForEach(datos.filas, id: \.k) { f in
+                    HStack(spacing: 8) {
+                        Text(f.k).font(fuente(9)).foregroundStyle(.secondary)
+                        Spacer(minLength: 10)
+                        Text(f.v).font(fuente(9, .medium, mono: true))
+                    }
+                }
+            }
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 6)
+        .background(
+            RoundedRectangle(cornerRadius: 6)
+                .fill(.regularMaterial)
+                .shadow(color: .black.opacity(0.28), radius: 8, y: 3)
+        )
+        .overlay(RoundedRectangle(cornerRadius: 6).stroke(Color.primary.opacity(0.12)))
+        .fixedSize()
     }
 }
 
@@ -68,74 +137,72 @@ private func filaDato(_ k: String, _ v: String) -> some View {
 
 private struct BarrasPorDia: View {
     let datos: [(dia: String, tokens: Tokens)]
-    @State private var sel: Int?
+    @Binding var tarjeta: DatosTarjeta?
 
     private var maximo: Int { max(datos.map { $0.tokens.total }.max() ?? 1, 1) }
+    private func alto(_ v: Int) -> CGFloat { max(esc(3), esc(74) * CGFloat(v) / CGFloat(maximo)) }
 
     var body: some View {
         if datos.isEmpty {
             Text("Sin datos en el rango").font(fuente(10)).foregroundStyle(.tertiary)
         } else {
             VStack(alignment: .leading, spacing: 3) {
-            GeometryReader { geo in
-                ZStack(alignment: .topLeading) {
-                    HStack(alignment: .bottom, spacing: 2) {
+                GeometryReader { geo in
+                    let marco = geo.frame(in: .named(espacio))
+                    let ancho = (geo.size.width - CGFloat(max(datos.count - 1, 0)) * 2)
+                              / CGFloat(max(datos.count, 1))
+                    HStack(spacing: 2) {
                         ForEach(Array(datos.enumerated()), id: \.element.dia) { i, d in
-                            RoundedRectangle(cornerRadius: 2)
-                                .fill(color(i, d.tokens.total))
-                                .frame(height: max(esc(3), esc(74) * CGFloat(d.tokens.total) / CGFloat(maximo)))
-                                .contentShape(Rectangle())
-                                .onHover { dentro in sel = dentro ? i : (sel == i ? nil : sel) }
+                            // La columna entera acepta el mouse, no solo la barra:
+                            // con barras de 3 px apuntar sería una tortura.
+                            ZStack(alignment: .bottom) {
+                                Color.clear
+                                RoundedRectangle(cornerRadius: 2)
+                                    .fill(color(i, d.tokens.total))
+                                    .frame(height: alto(d.tokens.total))
+                            }
+                            .contentShape(Rectangle())
+                            .onHover { dentro in
+                                let id = "dia-\(d.dia)"
+                                if dentro {
+                                    let x = marco.minX + CGFloat(i) * (ancho + 2)
+                                    tarjeta = DatosTarjeta(
+                                        id: id,
+                                        ancla: CGRect(x: x, y: marco.minY,
+                                                      width: ancho, height: marco.height),
+                                        titulo: Formato.diaLargo(d.dia),
+                                        valor: Formato.tokens(d.tokens.total) + " tokens",
+                                        color: Paleta.acento,
+                                        filas: [
+                                            .init(k: "Entrada", v: Formato.tokens(d.tokens.entrada)),
+                                            .init(k: "Salida", v: Formato.tokens(d.tokens.salida)),
+                                            .init(k: "Caché escrita", v: Formato.tokens(d.tokens.cacheEscritura)),
+                                            .init(k: "Caché leída", v: Formato.tokens(d.tokens.cacheLectura)),
+                                            .init(k: "Mensajes", v: Formato.entero(d.tokens.mensajes))
+                                        ])
+                                } else if tarjeta?.id == id {
+                                    tarjeta = nil
+                                }
+                            }
                         }
                     }
-                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
-
-                    if let i = sel, i < datos.count {
-                        tarjeta(datos[i])
-                            .offset(x: desplazamiento(i, ancho: geo.size.width), y: 0)
-                    }
                 }
-            }
-            .frame(height: esc(78))
-            .onHover { if !$0 { sel = nil } }
+                .frame(height: esc(78))
 
-            HStack {
-                Text(Formato.diaLargo(datos.first!.dia))
-                Spacer()
-                Text(Formato.diaLargo(datos.last!.dia))
-            }
-            .font(fuente(9))
-            .foregroundStyle(.tertiary)
+                HStack {
+                    Text(Formato.diaLargo(datos.first!.dia))
+                    Spacer()
+                    Text(Formato.diaLargo(datos.last!.dia))
+                }
+                .font(fuente(9))
+                .foregroundStyle(.tertiary)
             }
         }
     }
 
     private func color(_ i: Int, _ valor: Int) -> Color {
-        // La barra apuntada se resalta; el resto varía con su magnitud.
         let intensidad = 0.35 + 0.5 * Double(valor) / Double(maximo)
-        return sel == i ? Paleta.acento : Paleta.acento.opacity(intensidad)
-    }
-
-    /// Mantiene la tarjeta dentro del ancho visible.
-    private func desplazamiento(_ i: Int, ancho: CGFloat) -> CGFloat {
-        guard datos.count > 0 else { return 0 }
-        let x = ancho * CGFloat(i) / CGFloat(datos.count)
-        return min(max(x - 40, 0), max(ancho - 150, 0))
-    }
-
-    private func tarjeta(_ d: (dia: String, tokens: Tokens)) -> some View {
-        Tarjeta {
-            Text(Formato.diaLargo(d.dia)).font(fuente(10, .semibold))
-            Text(Formato.tokens(d.tokens.total) + " tokens")
-                .font(fuente(10, .medium, mono: true))
-                .foregroundStyle(Paleta.acento)
-            Divider().padding(.vertical, 1)
-            filaDato("Entrada", Formato.tokens(d.tokens.entrada))
-            filaDato("Salida", Formato.tokens(d.tokens.salida))
-            filaDato("Caché escrita", Formato.tokens(d.tokens.cacheEscritura))
-            filaDato("Caché leída", Formato.tokens(d.tokens.cacheLectura))
-            filaDato("Mensajes", "\(d.tokens.mensajes)")
-        }
+        return tarjeta?.id == "dia-\(datos[i].dia)" ? Paleta.acento : Paleta.acento.opacity(intensidad)
     }
 }
 
@@ -145,7 +212,7 @@ private struct BarrasPorDia: View {
 /// y el detalle aparece al pasar el mouse.
 private struct BarraModelos: View {
     let datos: [(modelo: String, tokens: Tokens)]
-    @State private var sel: Int?
+    @Binding var tarjeta: DatosTarjeta?
 
     private static let colores: [Color] = [
         Color(hue: 0.06, saturation: 0.72, brightness: 0.88),
@@ -157,7 +224,6 @@ private struct BarraModelos: View {
     ]
 
     private var total: Int { max(datos.reduce(0) { $0 + $1.tokens.total }, 1) }
-
     /// La leyenda va de a tres por fila.
     private var filasLeyenda: Int { max(1, (datos.count + 2) / 3) }
 
@@ -171,56 +237,56 @@ private struct BarraModelos: View {
             Text("Sin datos en el rango").font(fuente(10)).foregroundStyle(.tertiary)
         } else {
             GeometryReader { geo in
-                ZStack(alignment: .topLeading) {
-                    VStack(alignment: .leading, spacing: 7) {
-                        HStack(spacing: 1.5) {
-                            ForEach(Array(datos.enumerated()), id: \.element.modelo) { i, m in
-                                Rectangle()
-                                    .fill(Self.colores[i % Self.colores.count])
-                                    .opacity(sel == nil || sel == i ? 1 : 0.35)
-                                    .frame(width: max(2, (geo.size.width - CGFloat(datos.count) * 1.5)
-                                                        * CGFloat(m.tokens.total) / CGFloat(total)))
-                                    .onHover { dentro in sel = dentro ? i : (sel == i ? nil : sel) }
-                            }
+                let marco = geo.frame(in: .named(espacio))
+                let util = geo.size.width - CGFloat(datos.count) * 1.5
+                VStack(alignment: .leading, spacing: 7) {
+                    HStack(spacing: 1.5) {
+                        ForEach(Array(datos.enumerated()), id: \.element.modelo) { i, m in
+                            let ancho = max(2, util * CGFloat(m.tokens.total) / CGFloat(total))
+                            Rectangle()
+                                .fill(Self.colores[i % Self.colores.count])
+                                .opacity(tarjeta == nil || tarjeta?.id == "mod-\(m.modelo)" ? 1 : 0.35)
+                                .frame(width: ancho)
+                                .onHover { dentro in
+                                    let id = "mod-\(m.modelo)"
+                                    if dentro {
+                                        tarjeta = DatosTarjeta(
+                                            id: id,
+                                            ancla: CGRect(x: marco.minX + inicio(i, util: util),
+                                                          y: marco.minY, width: ancho, height: esc(16)),
+                                            titulo: Self.corto(m.modelo),
+                                            valor: Formato.tokens(m.tokens.total) + " tokens",
+                                            color: Self.colores[i % Self.colores.count],
+                                            filas: [
+                                                .init(k: "Del total", v: Formato.porcentaje(Double(m.tokens.total) / Double(total) * 100)),
+                                                .init(k: "Salida", v: Formato.tokens(m.tokens.salida)),
+                                                .init(k: "Caché leída", v: Formato.tokens(m.tokens.cacheLectura)),
+                                                .init(k: "Mensajes", v: Formato.entero(m.tokens.mensajes))
+                                            ])
+                                    } else if tarjeta?.id == id {
+                                        tarjeta = nil
+                                    }
+                                }
                         }
-                        .frame(height: esc(16))
-                        .clipShape(RoundedRectangle(cornerRadius: 3))
-
-                        // Leyenda compacta: nombre y porcentaje, sin tabla.
-                        FlujoLeyenda(items: Array(datos.enumerated()).map { i, m in
-                            (Self.corto(m.modelo),
-                             Self.colores[i % Self.colores.count],
-                             Formato.porcentaje(Double(m.tokens.total) / Double(total) * 100))
-                        })
                     }
+                    .frame(height: esc(16))
+                    .clipShape(RoundedRectangle(cornerRadius: 3))
 
-                    if let i = sel, i < datos.count {
-                        Tarjeta {
-                            Text(Self.corto(datos[i].modelo)).font(fuente(10, .semibold))
-                            Text(Formato.tokens(datos[i].tokens.total) + " tokens")
-                                .font(fuente(10, .medium, mono: true))
-                                .foregroundStyle(Self.colores[i % Self.colores.count])
-                            Divider().padding(.vertical, 1)
-                            filaDato("Del total", Formato.porcentaje(Double(datos[i].tokens.total) / Double(total) * 100))
-                            filaDato("Salida", Formato.tokens(datos[i].tokens.salida))
-                            filaDato("Caché leída", Formato.tokens(datos[i].tokens.cacheLectura))
-                            filaDato("Mensajes", "\(datos[i].tokens.mensajes)")
-                        }
-                        .offset(x: min(max(desplazamiento(i, ancho: geo.size.width), 0),
-                                       max(geo.size.width - 150, 0)),
-                                y: 20)
-                    }
+                    FlujoLeyenda(items: Array(datos.enumerated()).map { i, m in
+                        (Self.corto(m.modelo),
+                         Self.colores[i % Self.colores.count],
+                         Formato.porcentaje(Double(m.tokens.total) / Double(total) * 100))
+                    })
                 }
             }
             .frame(height: esc(23) + CGFloat(filasLeyenda) * esc(15))
-            .onHover { if !$0 { sel = nil } }
         }
     }
 
-    /// Deja la tarjeta a la altura del segmento apuntado.
-    private func desplazamiento(_ i: Int, ancho: CGFloat) -> CGFloat {
+    /// Dónde empieza el segmento i dentro de la barra apilada.
+    private func inicio(_ i: Int, util: CGFloat) -> CGFloat {
         let previos = datos.prefix(i).reduce(0) { $0 + $1.tokens.total }
-        return ancho * CGFloat(previos) / CGFloat(total) - 20
+        return util * CGFloat(previos) / CGFloat(total) + CGFloat(i) * 1.5
     }
 }
 
@@ -252,13 +318,13 @@ private struct FlujoLeyenda: View {
 
 private struct SerieLimites: View {
     let muestras: [MuestraSuscripcion]
-    @State private var sel: Int?
+    @Binding var tarjeta: DatosTarjeta?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 5) {
             GeometryReader { geo in
+                let marco = geo.frame(in: .named(espacio))
                 ZStack(alignment: .topLeading) {
-                    // Referencias al 50 % y 100 %.
                     ForEach([0.0, 0.5], id: \.self) { f in
                         Rectangle().fill(Color.primary.opacity(0.06))
                             .frame(height: 1)
@@ -268,17 +334,11 @@ private struct SerieLimites: View {
                     linea(\.frontera, color: Paleta.semaforo(muestras.last?.frontera ?? 0), geo: geo)
                     linea(\.sesion, color: Paleta.semaforo(muestras.last?.sesion ?? 0), geo: geo)
 
-                    if let i = sel, i < muestras.count {
-                        Tarjeta {
-                            Text(Formato.fechaHora(muestras[i].ts)).font(fuente(10, .semibold))
-                            Divider().padding(.vertical, 1)
-                            filaDato("Sesión", muestras[i].sesion.map { Formato.porcentaje($0) } ?? "—")
-                            filaDato("Semanal", muestras[i].semanal.map { Formato.porcentaje($0) } ?? "—")
-                            filaDato(muestras[i].modeloFrontera?.isEmpty == false ? muestras[i].modeloFrontera! : "Frontera",
-                                     muestras[i].frontera.map { Formato.porcentaje($0) } ?? "—")
-                        }
-                        .offset(x: min(max(geo.size.width * CGFloat(i) / CGFloat(max(muestras.count - 1, 1)) - 40, 0),
-                                       max(geo.size.width - 130, 0)), y: 0)
+                    // Guía vertical en la muestra apuntada.
+                    if let t = tarjeta, t.id.hasPrefix("lim-"), let i = Int(t.id.dropFirst(4)) {
+                        Rectangle().fill(Color.primary.opacity(0.18))
+                            .frame(width: 1, height: geo.size.height)
+                            .offset(x: posX(i, ancho: geo.size.width))
                     }
                 }
                 .contentShape(Rectangle())
@@ -286,8 +346,23 @@ private struct SerieLimites: View {
                     switch fase {
                     case .active(let p):
                         let f = max(min(p.x / max(geo.size.width, 1), 1), 0)
-                        sel = Int((f * CGFloat(muestras.count - 1)).rounded())
-                    case .ended: sel = nil
+                        let i = Int((f * CGFloat(muestras.count - 1)).rounded())
+                        guard i >= 0, i < muestras.count else { return }
+                        let m = muestras[i]
+                        tarjeta = DatosTarjeta(
+                            id: "lim-\(i)",
+                            ancla: CGRect(x: marco.minX + posX(i, ancho: geo.size.width),
+                                          y: marco.minY, width: 1, height: geo.size.height),
+                            titulo: Formato.fechaHora(m.ts),
+                            valor: m.semanal.map { "Semanal " + Formato.porcentaje($0) } ?? "—",
+                            color: Paleta.semaforo(m.semanal ?? 0),
+                            filas: [
+                                .init(k: "Sesión", v: m.sesion.map { Formato.porcentaje($0) } ?? "—"),
+                                .init(k: m.modeloFrontera?.isEmpty == false ? m.modeloFrontera! : "Frontera",
+                                      v: m.frontera.map { Formato.porcentaje($0) } ?? "—")
+                            ])
+                    case .ended:
+                        if tarjeta?.id.hasPrefix("lim-") == true { tarjeta = nil }
                     }
                 }
             }
@@ -306,6 +381,10 @@ private struct SerieLimites: View {
         }
     }
 
+    private func posX(_ i: Int, ancho: CGFloat) -> CGFloat {
+        muestras.count <= 1 ? 0 : ancho * CGFloat(i) / CGFloat(muestras.count - 1)
+    }
+
     private func leyenda(_ t: String, _ c: Color) -> some View {
         HStack(spacing: 3) {
             Circle().fill(c).frame(width: 5, height: 5)
@@ -317,8 +396,8 @@ private struct SerieLimites: View {
         Path { p in
             let puntos = muestras.enumerated().compactMap { i, m -> CGPoint? in
                 guard let v = m[keyPath: campo] else { return nil }
-                let x = muestras.count <= 1 ? 0 : geo.size.width * CGFloat(i) / CGFloat(muestras.count - 1)
-                return CGPoint(x: x, y: geo.size.height * (1 - CGFloat(min(v, 100)) / 100))
+                return CGPoint(x: posX(i, ancho: geo.size.width),
+                               y: geo.size.height * (1 - CGFloat(min(v, 100)) / 100))
             }
             guard let primero = puntos.first else { return }
             p.move(to: primero)

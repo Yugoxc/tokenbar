@@ -11,6 +11,28 @@ Entrada nueva SIEMPRE al inicio. Plantilla:
 **Pendiente**: <lo que quedó fuera, o "nada">
 ```
 
+## 2026-09-08 — la tarjeta del histórico ahora flota de verdad
+
+**Qué**: el estado de la tarjeta (`DatosTarjeta`: ancla, título, valor, filas)
+subió a `VistaHistorico` y se dibuja en el `ZStack` raíz, fuera del `ScrollView`
+y con `zIndex` alto. Cada gráfico reporta el rectángulo del elemento apuntado en
+el espacio de coordenadas `"historico"`; la tarjeta se coloca arriba de ese
+rectángulo, o abajo si no cabe, nunca encima. Además, en las barras por día la
+zona sensible al mouse pasó a ser la columna completa (antes era solo la barra,
+imposible de apuntar con 3 px de alto) y el ancla es esa misma columna.
+
+**Por qué**: dibujada dentro del gráfico, la tarjeta quedaba tapada por las
+secciones siguientes, la recortaba el contenedor y se metía justo donde estaba
+el cursor.
+
+**Cómo verificar**: `VistaHistorico(co:plano:demo:)` acepta una tarjeta fijada
+para las previsualizaciones — el PNG `prev-historico-tarjeta.png` la muestra
+sobre la barra de modelos sin haber corrido nada de sitio.
+
+**Docs**: `CLAUDE.md` — gotcha del renderizado de la tarjeta.
+
+**Pendiente**: nada.
+
 ## 2026-09-08 — configuración de la barra, semáforo continuo y rediseño del histórico
 
 **Qué**:

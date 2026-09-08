@@ -121,6 +121,14 @@ swiftc -O ${=FUENTES} /tmp/p/main.swift -o /tmp/prevtb && /tmp/prevtb /tmp
 - **Los controles nativos (`Picker` segmentado, `Toggle`, `Slider`) salen como
   rectángulos amarillos** en esas previsualizaciones. Es un artefacto del
   renderizador, no un error del app.
+- **La tarjeta del histórico no puede vivir dentro del gráfico.** Dibujada como
+  hermana, las secciones que vienen después se pintan encima y además el
+  contenedor la recorta. Por eso el estado (`DatosTarjeta`) sube a
+  `VistaHistorico` y la tarjeta se dibuja en el `ZStack` raíz, fuera del
+  `ScrollView`: así flota sobre todo y no participa del layout. Cada gráfico
+  reporta el rectángulo del elemento apuntado en el espacio de coordenadas
+  `"historico"`, y la tarjeta se ubica arriba o abajo de ese rectángulo —nunca
+  encima— para no tapar el cursor.
 
 ## Preferencias del usuario
 
