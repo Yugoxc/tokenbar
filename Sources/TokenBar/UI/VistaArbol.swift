@@ -2,6 +2,9 @@ import SwiftUI
 
 struct VistaArbol: View {
     @ObservedObject var co: Coordinador
+    /// Sin ScrollView: solo para las previsualizaciones a PNG del script de
+    /// desarrollo, que no saben dibujar contenido dentro de un ScrollView.
+    var plano = false
 
     private var total: Int { max(co.raiz.tokens.total, 1) }
 
@@ -19,21 +22,26 @@ struct VistaArbol: View {
         return out
     }
 
+    @ViewBuilder private var filas: some View {
+        ForEach(visibles, id: \.nodo.id) { par in
+            FilaArbol(nodo: par.nodo, nivel: par.nivel, total: total, co: co)
+        }
+    }
+
     var body: some View {
         VStack(spacing: 0) {
             if co.raiz.tokens.total == 0 {
                 Text(co.escaneando ? "Leyendo transcripts…" : "Sin uso en este rango")
-                    .font(.system(size: 11))
+                    .font(fuente(11))
                     .foregroundStyle(.tertiary)
                     .frame(maxWidth: .infinity, minHeight: 120)
             } else {
-                ScrollView {
-                    LazyVStack(spacing: 0) {
-                        ForEach(visibles, id: \.nodo.id) { par in
-                            FilaArbol(nodo: par.nodo, nivel: par.nivel, total: total, co: co)
-                        }
+                if plano {
+                    VStack(spacing: 0) { filas }.padding(.vertical, 2)
+                } else {
+                    ScrollView {
+                        LazyVStack(spacing: 0) { filas }.padding(.vertical, 2)
                     }
-                    .padding(.vertical, 2)
                 }
             }
         }
@@ -57,14 +65,14 @@ private struct FilaArbol: View {
             Group {
                 if !nodo.esHoja {
                     Image(systemName: "chevron.right")
-                        .font(.system(size: 8, weight: .bold))
+                        .font(fuente(8, .bold))
                         .rotationEffect(.degrees(abierto ? 90 : 0))
                         .foregroundStyle(.secondary)
                 } else {
                     Circle().fill(Color.primary.opacity(0.18)).frame(width: 3, height: 3)
                 }
             }
-            .frame(width: 10)
+            .frame(width: esc(10))
 
             Text(nodo.nombre)
                 .font(.system(size: 11, weight: nivel == 0 ? .medium : .regular))
@@ -77,7 +85,7 @@ private struct FilaArbol: View {
                 Button {
                     co.abrirEnFinder(nodo.id)
                 } label: {
-                    Image(systemName: "folder").font(.system(size: 9))
+                    Image(systemName: "folder").font(fuente(9))
                 }
                 .buttonStyle(.plain)
                 .foregroundStyle(.secondary)
@@ -85,25 +93,25 @@ private struct FilaArbol: View {
             }
 
             Text(Formato.tokens(nodo.tokens.total))
-                .font(.system(size: 10, weight: .medium).monospacedDigit())
+                .font(fuente(10, .medium, mono: true))
                 .foregroundStyle(.secondary)
-                .frame(width: 58, alignment: .trailing)
+                .frame(width: esc(58), alignment: .trailing)
 
             // Barra proporcional: comparar carpetas de un vistazo.
             ZStack(alignment: .leading) {
                 Capsule().fill(Color.primary.opacity(0.06))
                 Capsule()
                     .fill(Paleta.nivel(nivel))
-                    .frame(width: max(1.5, 46 * min(pct, 100) / 100))
+                    .frame(width: max(1.5, esc(46) * min(pct, 100) / 100))
             }
-            .frame(width: 46, height: 4)
+            .frame(width: esc(46), height: esc(4))
 
             Text(Formato.porcentaje(pct))
-                .font(.system(size: 10).monospacedDigit())
+                .font(fuente(10, mono: true))
                 .foregroundStyle(.tertiary)
-                .frame(width: 38, alignment: .trailing)
+                .frame(width: esc(38), alignment: .trailing)
         }
-        .padding(.leading, CGFloat(nivel) * 12 + 8)
+        .padding(.leading, CGFloat(nivel) * esc(12) + esc(8))
         .padding(.trailing, 8)
         .padding(.vertical, 3)
         .background(sobre ? Color.primary.opacity(0.05) : .clear)

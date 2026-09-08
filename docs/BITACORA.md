@@ -11,6 +11,36 @@ Entrada nueva SIEMPRE al inicio. Plantilla:
 **Pendiente**: <lo que quedó fuera, o "nada">
 ```
 
+## 2026-09-08 — configuración de la barra, semáforo continuo y rediseño del histórico
+
+**Qué**:
+- **Ajustes** (engranaje del panel): qué ventanas mostrar en la barra de menús
+  (sesión / semanal / modelo frontera), si anexar el reloj de reinicio, las
+  etiquetas «5h»/«7d», el ícono, y **dos controles de tamaño de letra** (panel y
+  barra). Todo en `UserDefaults`.
+- **La barra ahora apila las líneas y las pinta**: `MenuBarExtra` descarta el
+  color del label, así que se renderiza con `ImageRenderer` e `isTemplate=false`.
+  Máximo dos líneas: macOS da ~22 pt y una tercera sale recortada.
+- **Semáforo continuo** verde→rojo lineal, en vez de cuatro tramos fijos.
+- **Tiempos en formato reloj** (`2:31`, `5d 20:01`) en vez de «3 h 12 min».
+- **Histórico rediseñado**: la tabla por modelo pasó a ser una barra apilada con
+  leyenda compacta, y tanto ella como las barras por día muestran el detalle en
+  una tarjeta al pasar el mouse, en vez de gastar pantalla en columnas.
+- **Árbol**: la carpeta personal se muestra como `~` y al abrir el panel se
+  despliega sola la rama más pesada.
+- **`scripts/previsualizar.swift`**: dibuja las vistas reales a PNG contra la
+  base de verdad, para revisar la interfaz sin abrir el app.
+
+**Por qué**: el dueño pidió elegir qué porcentajes ver y el tiempo de reinicio,
+la letra era ilegible, y la vista de histórico "se veía pésimo" por ser tablas.
+
+**Cómo verificar**: `./scripts/instalar.sh` y abrir el panel; o generar los PNG
+con el script de previsualización (receta en `CLAUDE.md`).
+
+**Docs**: `CLAUDE.md` — arquitectura, preferencias, gotchas del renderizado.
+
+**Pendiente**: nada.
+
 ## 2026-09-08 — nace tokenbar: reemplazo de ClaudeBar con árbol por carpetas
 
 **Qué**: App de barra de menús en SwiftUI que lee los transcripts de Claude Code

@@ -34,7 +34,7 @@ struct FilaUso {
 /// Nodo del árbol de carpetas. Los hijos se arman al vuelo desde las filas.
 final class NodoArbol: Identifiable {
     let id: String          // ruta absoluta completa
-    let nombre: String      // último segmento
+    var nombre: String      // último segmento
     var tokens = Tokens()
     var hijos: [NodoArbol] = []
     /// Tokens registrados en esta ruta exacta (sin contar subcarpetas).

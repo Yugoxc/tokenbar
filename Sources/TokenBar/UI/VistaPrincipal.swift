@@ -2,7 +2,9 @@ import SwiftUI
 
 struct VistaPrincipal: View {
     @ObservedObject var co: Coordinador
+    @ObservedObject var prefs = Preferencias.compartidas
     @State private var pestana = 0
+    @State private var ajustesAbiertos = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -24,7 +26,7 @@ struct VistaPrincipal: View {
             Divider()
             pie
         }
-        .frame(width: 420, height: 600)
+        .frame(width: esc(420), height: min(esc(600), 780))
     }
 
     // MARK: - Bloques
@@ -33,9 +35,9 @@ struct VistaPrincipal: View {
         HStack(spacing: 6) {
             Image(systemName: "chart.bar.doc.horizontal")
                 .foregroundStyle(Paleta.acento)
-            Text("TokenBar").font(.system(size: 13, weight: .semibold))
+            Text("TokenBar").font(fuente(13, .semibold))
             Text(co.suscripcion.plan)
-                .font(.system(size: 9, weight: .medium))
+                .font(fuente(9, .medium))
                 .padding(.horizontal, 5).padding(.vertical, 1.5)
                 .background(Capsule().fill(Paleta.acento.opacity(0.15)))
                 .foregroundStyle(Paleta.acento)
@@ -44,14 +46,20 @@ struct VistaPrincipal: View {
                 ProgressView().controlSize(.mini)
                 if co.progreso.total > 0 {
                     Text("\(co.progreso.hechos)/\(co.progreso.total)")
-                        .font(.system(size: 9).monospacedDigit())
+                        .font(fuente(9, mono: true))
                         .foregroundStyle(.tertiary)
                 }
             }
-            Button { co.refrescar() } label: { Image(systemName: "arrow.clockwise").font(.system(size: 10)) }
+            Button { co.refrescar() } label: { Image(systemName: "arrow.clockwise").font(fuente(10)) }
                 .buttonStyle(.plain).foregroundStyle(.secondary)
                 .help("Refrescar ahora")
-            Button { NSApplication.shared.terminate(nil) } label: { Image(systemName: "power").font(.system(size: 10)) }
+            Button { ajustesAbiertos.toggle() } label: { Image(systemName: "gearshape").font(fuente(10)) }
+                .buttonStyle(.plain).foregroundStyle(.secondary)
+                .help("Qué mostrar en la barra")
+                .popover(isPresented: $ajustesAbiertos, arrowEdge: .bottom) {
+                    VistaAjustes(co: co, prefs: prefs)
+                }
+            Button { NSApplication.shared.terminate(nil) } label: { Image(systemName: "power").font(fuente(10)) }
                 .buttonStyle(.plain).foregroundStyle(.secondary)
                 .help("Salir")
         }
@@ -71,9 +79,9 @@ struct VistaPrincipal: View {
 
     private var totales: some View {
         HStack(spacing: 0) {
-            Metrica(titulo: "Tokens \(co.rango.rawValue.lowercased())",
+            Metrica(titulo: "Tokens",
                     valor: Formato.tokens(co.raiz.tokens.total),
-                    detalle: "\(co.raiz.tokens.mensajes) mensajes")
+                    detalle: "\(Formato.entero(co.raiz.tokens.mensajes)) mensajes")
             Metrica(titulo: "Caché leída",
                     valor: Formato.tokens(co.raiz.tokens.cacheLectura),
                     detalle: porcentajeCache)
@@ -81,7 +89,7 @@ struct VistaPrincipal: View {
                     valor: Formato.tokens(co.raiz.tokens.salida),
                     detalle: "entrada \(Formato.tokens(co.raiz.tokens.entrada))")
             Metrica(titulo: "Carpetas",
-                    valor: "\(cuentaHojas(co.raiz))",
+                    valor: Formato.entero(cuentaHojas(co.raiz)),
                     detalle: "\(co.porModelo.count) modelos")
         }
         .padding(.horizontal, 10).padding(.vertical, 8)
@@ -119,7 +127,7 @@ struct VistaPrincipal: View {
             Spacer()
             Text("Revisado \(Formato.hace(co.ultimoRefresco))")
         }
-        .font(.system(size: 9))
+        .font(fuente(9))
         .foregroundStyle(.tertiary)
         .padding(.horizontal, 10).padding(.vertical, 5)
     }

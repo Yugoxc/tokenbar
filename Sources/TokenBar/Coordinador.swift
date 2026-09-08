@@ -61,17 +61,53 @@ final class Coordinador: ObservableObject {
         }
     }
 
-    /// Texto corto para la barra de menús: manda el límite más apretado.
-    var resumenBarra: String {
-        let candidatos = [suscripcion.sesion, suscripcion.semanal, suscripcion.frontera].compactMap { $0 }
-        guard let peor = candidatos.max(by: { $0.porcentaje < $1.porcentaje }) else { return "—" }
-        return "\(Int(peor.porcentaje.rounded()))%"
+    /// Las líneas que se apilan en la barra de menús, cada una con su color
+    /// según qué tan cerca del límite esté.
+    ///
+    /// Nunca más de dos: macOS da unos 22 pt de alto y una tercera línea sale
+    /// recortada. Con tres ventanas activas, las dos últimas comparten línea.
+    func lineasBarra(_ p: Preferencias) -> [LineaBarra] {
+        var partes: [(texto: String, pct: Double)] = []
+
+        func agregar(_ etq: String, _ v: Ventana) {
+            partes.append(((p.mostrarEtiquetas ? etq + " " : "") + "\(Int(v.porcentaje.rounded()))%",
+                           v.porcentaje))
+        }
+
+        if p.ningunaVentana {
+            if let peor = ventanas.max(by: { $0.0.porcentaje < $1.0.porcentaje }) {
+                agregar(peor.1, peor.0)
+            }
+        } else {
+            if p.mostrarSesion, let v = suscripcion.sesion { agregar("5h", v) }
+            if p.mostrarSemanal, let v = suscripcion.semanal { agregar("7d", v) }
+            if p.mostrarFrontera, let v = suscripcion.frontera {
+                agregar(String(v.etiqueta.prefix(4)), v)
+            }
+        }
+        guard !partes.isEmpty else { return [LineaBarra(texto: "—", color: .secondary)] }
+
+        // El reinicio que importa es el de la ventana de 5 h: es la que se
+        // libera seguido y la que decide si conviene seguir trabajando ahora.
+        if p.mostrarRestante, let r = suscripcion.sesion?.reinicia {
+            partes[0].texto += "  " + Formato.reloj(r)
+        }
+
+        if partes.count <= 2 {
+            return partes.map { LineaBarra(texto: $0.texto, color: Paleta.semaforo($0.pct)) }
+        }
+        let resto = partes.dropFirst()
+        return [
+            LineaBarra(texto: partes[0].texto, color: Paleta.semaforo(partes[0].pct)),
+            LineaBarra(texto: resto.map(\.texto).joined(separator: " · "),
+                       color: Paleta.semaforo(resto.map(\.pct).max() ?? 0))
+        ]
     }
 
-    var colorBarra: Color {
-        let candidatos = [suscripcion.sesion, suscripcion.semanal, suscripcion.frontera].compactMap { $0 }
-        let peor = candidatos.map(\.porcentaje).max() ?? 0
-        return Paleta.semaforo(peor)
+    /// Las tres ventanas presentes, con su nombre, para reutilizar en cálculos.
+    private var ventanas: [(Ventana, String)] {
+        [(suscripcion.sesion, "5h"), (suscripcion.semanal, "7d"), (suscripcion.frontera, "modelo")]
+            .compactMap { v, n in v.map { ($0, n) } }
     }
 
     func refrescar() {
@@ -103,6 +139,11 @@ final class Coordinador: ObservableObject {
         let visibles = corte == nil ? filas : filas.filter { $0.dia >= corte! }
 
         raiz = Arbol.construir(visibles)
+        // Al abrir por primera vez se despliega la rama más pesada: ver un
+        // árbol cerrado no dice nada.
+        if expandidos.isEmpty, let mayor = raiz.hijos.first {
+            expandidos.insert(mayor.id)
+        }
 
         var dias: [String: Tokens] = [:]
         var modelos: [String: Tokens] = [:]
@@ -136,23 +177,44 @@ enum Formato {
         }
     }
 
+    /// Miles con punto, como se escribe en Chile: 41.708.
+    static func entero(_ n: Int) -> String {
+        let s = String(n), inicio = s.hasPrefix("-") ? 1 : 0
+        var out = "", cuenta = 0
+        for c in s[s.index(s.startIndex, offsetBy: inicio)...].reversed() {
+            if cuenta > 0, cuenta % 3 == 0 { out.append(".") }
+            out.append(c); cuenta += 1
+        }
+        return (inicio == 1 ? "-" : "") + String(out.reversed())
+    }
+
     static func coma(_ v: Double) -> String {
         String(format: v < 10 ? "%.2f" : "%.1f", v).replacingOccurrences(of: ".", with: ",")
     }
 
+    /// Sin decimales: en la barra de menús cada carácter cuenta.
+    static func porcentajeCorto(_ v: Double) -> String {
+        "\(Int(v.rounded()))%"
+    }
+
+    /// Reloj: "2:45". Con días por delante cuando la ventana es semanal: "5d 3:12".
+    static func reloj(_ hasta: Date) -> String {
+        let s = max(Int(hasta.timeIntervalSinceNow), 0)
+        let d = s / 86400, h = (s % 86400) / 3600, m = (s % 3600) / 60
+        return d > 0 ? String(format: "%dd %d:%02d", d, h, m) : String(format: "%d:%02d", h, m)
+    }
+
     static func porcentaje(_ v: Double) -> String {
-        (v < 10 ? String(format: "%.1f", v) : String(format: "%.0f", v))
+        if v > 0, v < 0.1 { return "<0,1%" }
+        return (v < 10 ? String(format: "%.1f", v) : String(format: "%.0f", v))
             .replacingOccurrences(of: ".", with: ",") + "%"
     }
 
-    /// "en 3 h 12 min" — cuánto falta para que se libere una ventana.
+    /// "en 2:45" — cuánto falta para que se libere una ventana.
     static func restante(_ hasta: Date?) -> String {
         guard let hasta else { return "—" }
-        let s = Int(hasta.timeIntervalSinceNow)
-        if s <= 0 { return "ya" }
-        let h = s / 3600, m = (s % 3600) / 60
-        if h >= 24 { return "en \(h / 24) d \(h % 24) h" }
-        return h > 0 ? "en \(h) h \(m) min" : "en \(m) min"
+        if hasta.timeIntervalSinceNow <= 0 { return "ya" }
+        return "en " + reloj(hasta)
     }
 
     static func hace(_ fecha: Date?) -> String {
@@ -162,6 +224,23 @@ enum Formato {
         if s < 3600 { return "hace \(s / 60) min" }
         if s < 86400 { return "hace \(s / 3600) h" }
         return "hace \(s / 86400) d"
+    }
+
+    private static let meses = ["ene","feb","mar","abr","may","jun",
+                                "jul","ago","sep","oct","nov","dic"]
+
+    /// "2 de sep" — encabezado de la tarjeta del día.
+    static func diaLargo(_ iso: String) -> String {
+        let p = iso.split(separator: "-")
+        guard p.count == 3, let m = Int(p[1]), m >= 1, m <= 12, let d = Int(p[2]) else { return iso }
+        return "\(d) de \(meses[m - 1])"
+    }
+
+    /// "07/09 23:41" — instante de una muestra del histórico de límites.
+    static func fechaHora(_ ts: Int) -> String {
+        let f = DateFormatter()
+        f.dateFormat = "dd/MM HH:mm"
+        return f.string(from: Date(timeIntervalSince1970: TimeInterval(ts)))
     }
 
     static func dia(_ iso: String) -> String {

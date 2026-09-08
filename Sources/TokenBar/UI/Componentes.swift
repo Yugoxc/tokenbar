@@ -1,5 +1,21 @@
 import SwiftUI
 
+/// Fuente del panel aplicando la escala elegida por el usuario.
+///
+/// Todas las vistas del panel piden su tipografía por acá; como la raíz
+/// (`VistaPrincipal`) observa `Preferencias`, cambiar la escala vuelve a dibujar
+/// todo el árbol de vistas con el tamaño nuevo.
+@MainActor
+func fuente(_ tam: CGFloat, _ peso: Font.Weight = .regular, mono: Bool = false) -> Font {
+    let f = Font.system(size: tam * Preferencias.compartidas.escalaPanel, weight: peso)
+    return mono ? f.monospacedDigit() : f
+}
+
+/// Escala una medida fija (alto de un gráfico, ancho de una columna) junto con
+/// la letra, para que el diseño no se apriete al subir el tamaño.
+@MainActor
+func esc(_ v: CGFloat) -> CGFloat { v * Preferencias.compartidas.escalaPanel }
+
 enum Paleta {
     static let ok = Color(red: 0.30, green: 0.72, blue: 0.53)
     static let aviso = Color(red: 0.94, green: 0.71, blue: 0.24)
@@ -7,14 +23,16 @@ enum Paleta {
     static let critico = Color(red: 0.89, green: 0.35, blue: 0.35)
     static let acento = Color(red: 0.83, green: 0.45, blue: 0.28)   // naranjo Claude
 
-    /// Un solo criterio de color para todo el app: barras, texto y la barra de menús.
+    /// Verde → amarillo → rojo de forma continua: el color se mueve con el
+    /// porcentaje en vez de saltar por tramos, así se nota que va subiendo.
     static func semaforo(_ pct: Double) -> Color {
-        switch pct {
-        case ..<50: return ok
-        case ..<75: return aviso
-        case ..<90: return alto
-        default: return critico
-        }
+        let p = min(max(pct, 0), 100) / 100
+        // Hue 0,33 (verde) → 0,0 (rojo), lineal: a mitad de camino ya se ve
+        // amarillo, que es lo que se espera de un semáforo.
+        // El brillo baja un poco en la zona amarilla, donde más deslumbra.
+        let hue = 0.33 * (1 - p)
+        let brillo = 0.88 - 0.10 * (1 - abs(p - 0.5) * 2)
+        return Color(hue: hue, saturation: 0.85, brightness: brillo)
     }
 
     /// Tonos estables por profundidad del árbol, para que la jerarquía se lea.
@@ -38,13 +56,13 @@ struct BarraLimite: View {
                 Spacer(minLength: 4)
                 if let v = ventana {
                     Text(Formato.porcentaje(v.porcentaje))
-                        .font(.system(size: 11, weight: .semibold).monospacedDigit())
+                        .font(fuente(11, .semibold, mono: true))
                         .foregroundStyle(Paleta.semaforo(v.porcentaje))
                     Text(Formato.restante(v.reinicia))
-                        .font(.system(size: 10))
+                        .font(fuente(10))
                         .foregroundStyle(.tertiary)
                 } else {
-                    Text("sin datos").font(.system(size: 10)).foregroundStyle(.tertiary)
+                    Text("sin datos").font(fuente(10)).foregroundStyle(.tertiary)
                 }
             }
             GeometryReader { geo in
@@ -71,13 +89,13 @@ struct Metrica: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 1) {
             Text(titulo)
-                .font(.system(size: 9, weight: .medium))
+                .font(fuente(9, .medium))
                 .foregroundStyle(.tertiary)
                 .textCase(.uppercase)
             Text(valor)
-                .font(.system(size: 13, weight: .semibold).monospacedDigit())
+                .font(fuente(13, .semibold, mono: true))
             if let detalle {
-                Text(detalle).font(.system(size: 9)).foregroundStyle(.tertiary)
+                Text(detalle).font(fuente(9)).foregroundStyle(.tertiary)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -93,12 +111,12 @@ struct Seccion: View {
     var body: some View {
         HStack(spacing: 6) {
             Text(titulo)
-                .font(.system(size: 10, weight: .semibold))
+                .font(fuente(10, .semibold))
                 .foregroundStyle(.secondary)
                 .textCase(.uppercase)
             Rectangle().fill(Color.primary.opacity(0.08)).frame(height: 1)
             if let accion {
-                Button(action: accion) { Image(systemName: iconoAccion).font(.system(size: 9)) }
+                Button(action: accion) { Image(systemName: iconoAccion).font(fuente(9)) }
                     .buttonStyle(.plain)
                     .foregroundStyle(.tertiary)
             }

@@ -47,13 +47,15 @@ El plan sale de `oauthAccount.organizationRateLimitTier`
 ## Arquitectura
 
 ```
-TokenBarApp.swift   MenuBarExtra; el label muestra el límite más apretado
+TokenBarApp.swift   MenuBarExtra; el label se renderiza a imagen (ver abajo)
+Preferencias.swift  Qué mostrar en la barra y tamaños de letra (UserDefaults)
 Coordinador.swift   ObservableObject: orquesta escaneo, rango y formateo
 Escaner.swift       Lee los .jsonl de forma incremental (por offset)
 Almacen.swift       SQLite: agregados, dedup, control de archivos, histórico
 Suscripcion.swift   Lee ~/.claude.json
 Arbol.swift         Arma el árbol de carpetas desde las filas agregadas
-UI/                 VistaPrincipal, VistaArbol, VistaHistorico, Componentes
+UI/                 VistaPrincipal, VistaArbol, VistaHistorico, VistaAjustes,
+                    EtiquetaBarra, Componentes
 ```
 
 Base de datos: `~/Library/Application Support/TokenBar/tokenbar.sqlite`.
@@ -66,6 +68,17 @@ swift build -c release          # verificación: si compila, está sano
 ./scripts/instalar.sh           # copia a /Applications + LaunchAgent + relanza
 swift scripts/icono.swift Recursos/AppIcon.iconset && \
   iconutil -c icns Recursos/AppIcon.iconset -o Recursos/AppIcon.icns   # regenerar ícono
+```
+
+### Ver el diseño sin abrir el app
+
+`scripts/previsualizar.swift` dibuja las vistas reales a PNG contra la base de
+datos de verdad. Sirve para revisar cambios de interfaz de un vistazo:
+
+```bash
+mkdir -p /tmp/p && cp scripts/previsualizar.swift /tmp/p/main.swift
+FUENTES=$(ls Sources/TokenBar/*.swift Sources/TokenBar/UI/*.swift | grep -v TokenBarApp.swift | tr '\n' ' ')
+swiftc -O ${=FUENTES} /tmp/p/main.swift -o /tmp/prevtb && /tmp/prevtb /tmp
 ```
 
 ## Reglas duras
@@ -94,7 +107,37 @@ swift scripts/icono.swift Recursos/AppIcon.iconset && \
   archivo: si Claude está escribiendo una línea justo en ese momento, la cola
   parcial se vuelve a leer en el refresco siguiente.
 - **`Package.swift` no puede tener un archivo `main.swift`** junto con `@main`;
-  por eso el punto de entrada se llama `TokenBarApp.swift`.
+  por eso el punto de entrada se llama `TokenBarApp.swift`. Al revés, el script
+  de previsualización SÍ debe llamarse `main.swift` al compilarlo: Swift solo
+  permite código suelto en un archivo con ese nombre.
+- **`MenuBarExtra` descarta el color del label**: lo trata como imagen template.
+  Por eso `EtiquetaBarra.imagen` lo renderiza con `ImageRenderer` y marca
+  `isTemplate = false`; así el semáforo se ve en la barra.
+- **La barra de menús da ~22 pt de alto**: caben dos líneas, no tres. Con las
+  tres ventanas activas, las dos últimas comparten línea (ver `lineasBarra`).
+- **`ImageRenderer` no dibuja el contenido de un `ScrollView`** (sale en blanco).
+  Por eso `VistaArbol` y `VistaHistorico` aceptan `plano: true`, que el script
+  de previsualización usa para poder retratarlas.
+- **Los controles nativos (`Picker` segmentado, `Toggle`, `Slider`) salen como
+  rectángulos amarillos** en esas previsualizaciones. Es un artefacto del
+  renderizador, no un error del app.
+
+## Preferencias del usuario
+
+Se guardan en `UserDefaults` (dominio `cl.terraworks.tokenbar`) y se editan
+desde el engranaje del panel:
+
+| Clave | Qué controla | Defecto |
+|---|---|---|
+| `mostrarSesion` / `mostrarSemanal` / `mostrarFrontera` | Qué ventanas salen en la barra | sí / sí / no |
+| `mostrarRestante` | Anexa el reloj de la ventana de 5 h | sí |
+| `mostrarEtiquetas` | Prefijos «5h» y «7d» | sí |
+| `mostrarIcono` | Ícono del medidor | sí |
+| `escalaPanel` | Tamaño de letra del panel | 1,25 |
+| `escalaBarra` | Tamaño de letra en la barra (topeado a 1,25 con dos líneas) | 1,15 |
+
+Las vistas piden su tipografía a `fuente(_:_:mono:)` y sus medidas a `esc(_:)`,
+ambas en `UI/Componentes.swift`; así un solo control reescala todo el panel.
 
 ## Convenciones
 

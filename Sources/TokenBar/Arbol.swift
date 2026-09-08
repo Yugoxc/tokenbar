@@ -34,6 +34,19 @@ enum Arbol {
         }
 
         ordenar(raiz)
+
+        // Todo cuelga de la misma cadena (/Users/<usuario>): esos niveles no
+        // aportan nada, así que se suben los hijos hasta la primera bifurcación
+        // y el primer nivel visible ya son carpetas de verdad.
+        while raiz.hijos.count == 1, raiz.hijos[0].propios.total == 0, !raiz.hijos[0].hijos.isEmpty {
+            raiz.hijos = raiz.hijos[0].hijos
+        }
+        // La carpeta personal se muestra como "~": la ruta completa no aporta
+        // y se come el ancho de la fila.
+        let hogar = NSHomeDirectory()
+        for hijo in raiz.hijos where hijo.id == hogar {
+            hijo.nombre = "~"
+        }
         return raiz
     }
 
