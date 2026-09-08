@@ -70,8 +70,11 @@ final class Coordinador: ObservableObject {
         var partes: [(texto: String, pct: Double)] = []
 
         func agregar(_ etq: String, _ v: Ventana) {
-            partes.append(((p.mostrarEtiquetas ? etq + " " : "") + "\(Int(v.porcentaje.rounded()))%",
-                           v.porcentaje))
+            var t = (p.mostrarEtiquetas ? etq + " " : "") + "\(Int(v.porcentaje.rounded()))%"
+            // Cada ventana lleva su propio reloj: la de 5 h se libera en horas
+            // y la semanal en días, y en ambas interesa saber cuánto falta.
+            if p.mostrarRestante, let r = v.reinicia { t += "  " + Formato.reloj(r) }
+            partes.append((t, v.porcentaje))
         }
 
         if p.ningunaVentana {
@@ -86,12 +89,6 @@ final class Coordinador: ObservableObject {
             }
         }
         guard !partes.isEmpty else { return [LineaBarra(texto: "—", color: .secondary)] }
-
-        // El reinicio que importa es el de la ventana de 5 h: es la que se
-        // libera seguido y la que decide si conviene seguir trabajando ahora.
-        if p.mostrarRestante, let r = suscripcion.sesion?.reinicia {
-            partes[0].texto += "  " + Formato.reloj(r)
-        }
 
         if partes.count <= 2 {
             return partes.map { LineaBarra(texto: $0.texto, color: Paleta.semaforo($0.pct)) }

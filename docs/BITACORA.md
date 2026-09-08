@@ -11,6 +11,20 @@ Entrada nueva SIEMPRE al inicio. Plantilla:
 **Pendiente**: <lo que quedó fuera, o "nada">
 ```
 
+## 2026-09-08 — el reloj de reinicio va en cada ventana de la barra
+
+**Qué**: `lineasBarra` anexa el tiempo de reinicio a **cada** ventana mostrada,
+no solo a la de 5 h. La barra queda como `7%  2:05` sobre `35%  5d`.
+
+**Por qué**: la ventana semanal salía sin su tiempo, que es justamente el dato
+que dice si conviene esperar al reinicio o seguir gastando.
+
+**Cómo verificar**: `prev-barra.png` del script de previsualización.
+
+**Docs**: `CLAUDE.md` — tabla de preferencias (`mostrarRestante`).
+
+**Pendiente**: nada.
+
 ## 2026-09-08 — tiempos por unidad y barra sin prefijos
 
 **Qué**: `Formato.reloj` ahora muestra **solo días** cuando falta un día o más

@@ -138,7 +138,7 @@ desde el engranaje del panel:
 | Clave | Qué controla | Defecto |
 |---|---|---|
 | `mostrarSesion` / `mostrarSemanal` / `mostrarFrontera` | Qué ventanas salen en la barra | sí / sí / no |
-| `mostrarRestante` | Anexa el reloj de la ventana de 5 h | sí |
+| `mostrarRestante` | Anexa a cada ventana su reloj de reinicio | sí |
 | `mostrarEtiquetas` | Prefijos «5h» y «7d» | no |
 | `mostrarIcono` | Ícono del medidor | sí |
 | `escalaPanel` | Tamaño de letra del panel | 1,25 |

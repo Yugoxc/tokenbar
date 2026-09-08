@@ -21,8 +21,8 @@ struct VistaAjustes: View {
 
             Toggle(isOn: $prefs.mostrarRestante) {
                 VStack(alignment: .leading, spacing: 1) {
-                    Text("Tiempo hasta reiniciar la sesión").font(fuente(11))
-                    Text("Cuánto falta para que se libere la ventana de 5 h")
+                    Text("Tiempo hasta el reinicio").font(fuente(11))
+                    Text("Cuánto falta para que se libere cada ventana")
                         .font(fuente(9)).foregroundStyle(.tertiary)
                 }
             }
