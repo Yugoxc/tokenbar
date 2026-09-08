@@ -39,11 +39,19 @@ final class Coordinador: ObservableObject {
     @Published private(set) var error: String?
     @Published var expandidos: Set<String> = []
 
+    /// Se publica solo para que la barra de menús vuelva a dibujarse y el reloj
+    /// no se quede congelado entre escaneos.
+    @Published private(set) var ahora = Date()
+
     private var almacen: Almacen?
     private var escaner: Escaner?
     private let lector = LectorSuscripcion()
     private var filas: [FilaUso] = []
     private var timer: Timer?
+    private var latido: Timer?
+    private var inicioEscaneo: Date?
+    /// Token de `beginActivity`: mientras viva, macOS no duerme el proceso.
+    private var actividad: NSObjectProtocol?
 
     init() {
         do {
@@ -53,12 +61,39 @@ final class Coordinador: ObservableObject {
         } catch {
             self.error = error.localizedDescription
         }
+        // macOS aplica App Nap a las apps sin ventana (LSUIElement) y estira sus
+        // timers varios minutos: la barra se quedaba pegada hasta que el usuario
+        // la tocaba. Esta actividad evita la suspensión sin impedir que el
+        // equipo se duerma.
+        actividad = ProcessInfo.processInfo.beginActivity(
+            options: [.userInitiatedAllowingIdleSystemSleep],
+            reason: "Mantener al día el uso en la barra de menús")
+
         refrescar()
+
         // Claude reescribe ~/.claude.json cada ~5 min y los transcripts en cada
         // respuesta; 30 s mantiene la barra al día sin costo perceptible.
-        timer = Timer.scheduledTimer(withTimeInterval: 30, repeats: true) { [weak self] _ in
+        timer = programar(cada: 30) { [weak self] in self?.refrescar() }
+
+        // Latido aparte del escaneo: aunque un refresco se demore o falle, el
+        // reloj de la barra sigue avanzando.
+        latido = programar(cada: 10) { [weak self] in self?.ahora = Date() }
+
+        // Al despertar, los timers pueden venir atrasados: se fuerza una pasada.
+        NSWorkspace.shared.notificationCenter.addObserver(
+            forName: NSWorkspace.didWakeNotification, object: nil, queue: .main) { [weak self] _ in
             Task { @MainActor in self?.refrescar() }
         }
+    }
+
+    /// Timer en modo `.common`: en el modo por omisión se detiene mientras hay
+    /// un menú abierto o el usuario arrastra algo, y la barra se congela.
+    private func programar(cada segundos: TimeInterval, _ accion: @escaping () -> Void) -> Timer {
+        let t = Timer(timeInterval: segundos, repeats: true) { _ in
+            Task { @MainActor in accion() }
+        }
+        RunLoop.main.add(t, forMode: .common)
+        return t
     }
 
     /// Las líneas que se apilan en la barra de menús, cada una con su color
@@ -108,8 +143,12 @@ final class Coordinador: ObservableObject {
     }
 
     func refrescar() {
-        guard !escaneando, let escaner, let almacen else { return }
+        guard let escaner, let almacen else { return }
+        // Si un escaneo quedó colgado, pasado un rato se intenta igual: antes
+        // un solo escaneo trabado dejaba la barra muerta hasta reiniciar.
+        if escaneando, let i = inicioEscaneo, Date().timeIntervalSince(i) < 180 { return }
         escaneando = true
+        inicioEscaneo = Date()
         let lector = self.lector
         Task.detached(priority: .utility) { [weak self] in
             escaner.escanear { hechos, total in

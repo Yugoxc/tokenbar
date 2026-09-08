@@ -44,12 +44,27 @@ struct EtiquetaBarra: View {
     /// MenuBarExtra convierte la vista del label en imagen template y le quita
     /// el color; renderizándola nosotros con `isTemplate = false` el semáforo
     /// se conserva en la barra.
+    ///
+    /// El resultado se guarda: el `body` del label se evalúa muy seguido, y si
+    /// el renderizador falla —pasa al despertar el equipo o al cambiar de
+    /// pantalla, cuando `NSScreen.main` viene en nil— devolver una imagen vacía
+    /// dejaba la barra en blanco. Ante un fallo se reusa la última buena.
+    @MainActor private static var ultima: NSImage?
+    @MainActor private static var claveUltima = ""
+
     @MainActor
     static func imagen(_ lineas: [LineaBarra], conIcono: Bool) -> NSImage {
+        let escala = Preferencias.compartidas.escalaBarra
+        let clave = lineas.map { "\($0.texto)|\($0.color)" }.joined(separator: "§")
+                  + "|\(conIcono)|\(escala)"
+        if clave == claveUltima, let ultima { return ultima }
+
         let render = ImageRenderer(content: EtiquetaBarra(lineas: lineas, conIcono: conIcono))
         render.scale = NSScreen.main?.backingScaleFactor ?? 2
-        guard let img = render.nsImage else { return NSImage() }
+        guard let img = render.nsImage else { return ultima ?? NSImage() }
         img.isTemplate = false
+        ultima = img
+        claveUltima = clave
         return img
     }
 }

@@ -11,6 +11,37 @@ Entrada nueva SIEMPRE al inicio. Plantilla:
 **Pendiente**: <lo que quedó fuera, o "nada">
 ```
 
+## 2026-09-08 — la barra se quedaba pegada: App Nap, timers y render del label
+
+**Qué**: cuatro arreglos sobre la misma queja ("se buguea la barra y se queda
+pegada de vez en cuando"):
+
+1. **App Nap**: siendo `LSUIElement`, macOS suspendía el proceso y estiraba los
+   timers varios minutos. Se sostiene con `ProcessInfo.beginActivity`
+   (`userInitiatedAllowingIdleSystemSleep`), token guardado en el coordinador.
+2. **Timers en modo `.common`**: con `scheduledTimer` se detenían mientras
+   hubiera un menú abierto o un arrastre en curso.
+3. **Latido propio del reloj** (`ahora`, cada 10 s), separado del escaneo: aunque
+   un refresco se demore, la hora de la barra sigue avanzando.
+4. **Cache del label**: `ImageRenderer` devuelve `nil` al despertar el equipo o
+   cambiar de pantalla (`NSScreen.main` en nil) y se dibujaba una imagen vacía;
+   ahora se reusa la última buena.
+
+Además, el flag `escaneando` ya no puede bloquear el refresco para siempre: pasa
+igual si el escaneo lleva más de 180 s. Y se fuerza una pasada al despertar el
+equipo (`NSWorkspace.didWakeNotification`).
+
+**Por qué**: el diagnóstico descartó que fueran los datos — el WAL de SQLite se
+seguía escribiendo al segundo, con 3:22 de CPU en 18 h de vida. El que no se
+actualizaba era el label.
+
+**Cómo verificar**: dejar la app sin tocar y comprobar que el mtime de
+`tokenbar.sqlite-wal` avanza cada ~30 s.
+
+**Docs**: `CLAUDE.md` — cuatro gotchas nuevos.
+
+**Pendiente**: nada.
+
 ## 2026-09-08 — el reloj de reinicio va en cada ventana de la barra
 
 **Qué**: `lineasBarra` anexa el tiempo de reinicio a **cada** ventana mostrada,

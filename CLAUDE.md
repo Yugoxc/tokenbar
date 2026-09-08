@@ -121,6 +121,20 @@ swiftc -O ${=FUENTES} /tmp/p/main.swift -o /tmp/prevtb && /tmp/prevtb /tmp
 - **Los controles nativos (`Picker` segmentado, `Toggle`, `Slider`) salen como
   rectángulos amarillos** en esas previsualizaciones. Es un artefacto del
   renderizador, no un error del app.
+- **App Nap congela la app.** Al ser `LSUIElement` (sin ventana), macOS la
+  suspende y estira sus timers varios minutos: la barra se quedaba pegada hasta
+  que el usuario la tocaba. Se sostiene con `ProcessInfo.beginActivity`
+  (`userInitiatedAllowingIdleSystemSleep`, que igual deja dormir el equipo) y el
+  token se guarda en `Coordinador.actividad` — si se libera, vuelve el problema.
+- **Los timers deben ir en modo `.common`.** Con `Timer.scheduledTimer` (modo
+  por omisión) se detienen mientras hay un menú abierto o el usuario arrastra
+  algo. Por eso `Coordinador.programar(cada:)` los agrega a mano al RunLoop.
+- **El reloj de la barra tiene su propio latido** (`ahora`, cada 10 s), aparte
+  del escaneo: si un refresco se demora o falla, la hora igual sigue corriendo.
+- **`EtiquetaBarra.imagen` cachea la última imagen buena.** `ImageRenderer`
+  devuelve `nil` de vez en cuando —al despertar el equipo o cambiar de pantalla,
+  con `NSScreen.main` en nil— y devolver una imagen vacía dejaba la barra en
+  blanco.
 - **La tarjeta del histórico no puede vivir dentro del gráfico.** Dibujada como
   hermana, las secciones que vienen después se pintan encima y además el
   contenedor la recorta. Por eso el estado (`DatosTarjeta`) sube a
