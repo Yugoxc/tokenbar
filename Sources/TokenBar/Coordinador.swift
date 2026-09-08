@@ -197,11 +197,15 @@ enum Formato {
         "\(Int(v.rounded()))%"
     }
 
-    /// Reloj: "2:45". Con días por delante cuando la ventana es semanal: "5d 3:12".
+    /// Cuánto falta, en la unidad que corresponde: pasado el día, los minutos
+    /// no dicen nada, así que la ventana semanal muestra solo días ("5d"); bajo
+    /// las 24 h —siempre el caso de la ventana de 5 h— van horas y minutos
+    /// ("2:31").
     static func reloj(_ hasta: Date) -> String {
         let s = max(Int(hasta.timeIntervalSinceNow), 0)
-        let d = s / 86400, h = (s % 86400) / 3600, m = (s % 3600) / 60
-        return d > 0 ? String(format: "%dd %d:%02d", d, h, m) : String(format: "%d:%02d", h, m)
+        let dias = s / 86400
+        if dias >= 1 { return "\(dias)d" }
+        return String(format: "%d:%02d", s / 3600, (s % 3600) / 60)
     }
 
     static func porcentaje(_ v: Double) -> String {

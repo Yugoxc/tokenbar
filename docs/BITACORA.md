@@ -11,6 +11,26 @@ Entrada nueva SIEMPRE al inicio. Plantilla:
 **Pendiente**: <lo que quedó fuera, o "nada">
 ```
 
+## 2026-09-08 — tiempos por unidad y barra sin prefijos
+
+**Qué**: `Formato.reloj` ahora muestra **solo días** cuando falta un día o más
+(`5d`, antes `5d 20:01`) y horas con minutos por debajo de las 24 h (`2:16`), que
+es siempre el caso de la ventana de 5 h. Además, los prefijos «5h»/«7d» de la
+barra de menús quedaron apagados por defecto; la opción sigue en Ajustes y hay
+una migración de una sola pasada (`migracionSinEtiquetas`) para no pisar la
+elección si se vuelven a encender.
+
+**Por qué**: pedido del dueño — pasado el día los minutos son ruido, y en la
+barra los prefijos gastan ancho sin aportar (la posición ya distingue: arriba la
+sesión, abajo la semanal).
+
+**Cómo verificar**: el panel muestra «Sesión (5 h) … en 2:16» y «Semanal … en 5d»;
+la barra queda como `7%  2:16` sobre `35%`.
+
+**Docs**: `CLAUDE.md` — sección "Formato de tiempos" y tabla de preferencias.
+
+**Pendiente**: nada.
+
 ## 2026-09-08 — la tarjeta del histórico ahora flota de verdad
 
 **Qué**: el estado de la tarjeta (`DatosTarjeta`: ancla, título, valor, filas)

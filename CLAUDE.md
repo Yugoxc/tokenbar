@@ -139,13 +139,19 @@ desde el engranaje del panel:
 |---|---|---|
 | `mostrarSesion` / `mostrarSemanal` / `mostrarFrontera` | Qué ventanas salen en la barra | sí / sí / no |
 | `mostrarRestante` | Anexa el reloj de la ventana de 5 h | sí |
-| `mostrarEtiquetas` | Prefijos «5h» y «7d» | sí |
+| `mostrarEtiquetas` | Prefijos «5h» y «7d» | no |
 | `mostrarIcono` | Ícono del medidor | sí |
 | `escalaPanel` | Tamaño de letra del panel | 1,25 |
 | `escalaBarra` | Tamaño de letra en la barra (topeado a 1,25 con dos líneas) | 1,15 |
 
 Las vistas piden su tipografía a `fuente(_:_:mono:)` y sus medidas a `esc(_:)`,
 ambas en `UI/Componentes.swift`; así un solo control reescala todo el panel.
+
+## Formato de tiempos
+
+`Formato.reloj` decide la unidad según lo que queda: **desde un día completo,
+solo días** (`5d`), porque los minutos ya no informan nada; **bajo las 24 h,
+horas y minutos** (`2:16`). La ventana de 5 h cae siempre en el segundo caso.
 
 ## Convenciones
 

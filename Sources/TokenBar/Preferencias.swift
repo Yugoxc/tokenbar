@@ -24,9 +24,15 @@ final class Preferencias: ObservableObject {
         // ventana de 5 h se libere. Es lo que se mira más seguido.
         d.register(defaults: [
             "mostrarSesion": true, "mostrarSemanal": true, "mostrarFrontera": false,
-            "mostrarRestante": true, "mostrarEtiquetas": true, "mostrarIcono": true,
+            "mostrarRestante": true, "mostrarEtiquetas": false, "mostrarIcono": true,
             "escalaPanel": 1.25, "escalaBarra": 1.15
         ])
+        // La barra se pidió sin los prefijos «5h»/«7d»: se apagan una sola vez
+        // para no pisar la elección si más adelante se vuelven a encender.
+        if !d.bool(forKey: "migracionSinEtiquetas") {
+            d.set(false, forKey: "mostrarEtiquetas")
+            d.set(true, forKey: "migracionSinEtiquetas")
+        }
         mostrarSesion = d.bool(forKey: "mostrarSesion")
         mostrarSemanal = d.bool(forKey: "mostrarSemanal")
         mostrarFrontera = d.bool(forKey: "mostrarFrontera")
