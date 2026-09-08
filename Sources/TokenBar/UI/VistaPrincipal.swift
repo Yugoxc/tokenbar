@@ -1,0 +1,140 @@
+import SwiftUI
+
+struct VistaPrincipal: View {
+    @ObservedObject var co: Coordinador
+    @State private var pestana = 0
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            cabecera
+            Divider()
+            limites
+            Divider()
+            totales
+            Divider()
+            selector
+            Divider()
+
+            if pestana == 0 {
+                VistaArbol(co: co)
+            } else {
+                VistaHistorico(co: co)
+            }
+
+            Divider()
+            pie
+        }
+        .frame(width: 420, height: 600)
+    }
+
+    // MARK: - Bloques
+
+    private var cabecera: some View {
+        HStack(spacing: 6) {
+            Image(systemName: "chart.bar.doc.horizontal")
+                .foregroundStyle(Paleta.acento)
+            Text("TokenBar").font(.system(size: 13, weight: .semibold))
+            Text(co.suscripcion.plan)
+                .font(.system(size: 9, weight: .medium))
+                .padding(.horizontal, 5).padding(.vertical, 1.5)
+                .background(Capsule().fill(Paleta.acento.opacity(0.15)))
+                .foregroundStyle(Paleta.acento)
+            Spacer()
+            if co.escaneando {
+                ProgressView().controlSize(.mini)
+                if co.progreso.total > 0 {
+                    Text("\(co.progreso.hechos)/\(co.progreso.total)")
+                        .font(.system(size: 9).monospacedDigit())
+                        .foregroundStyle(.tertiary)
+                }
+            }
+            Button { co.refrescar() } label: { Image(systemName: "arrow.clockwise").font(.system(size: 10)) }
+                .buttonStyle(.plain).foregroundStyle(.secondary)
+                .help("Refrescar ahora")
+            Button { NSApplication.shared.terminate(nil) } label: { Image(systemName: "power").font(.system(size: 10)) }
+                .buttonStyle(.plain).foregroundStyle(.secondary)
+                .help("Salir")
+        }
+        .padding(.horizontal, 10).padding(.vertical, 8)
+    }
+
+    private var limites: some View {
+        VStack(spacing: 8) {
+            BarraLimite(titulo: "Sesión (5 h)", ventana: co.suscripcion.sesion)
+            BarraLimite(titulo: "Semanal (todos los modelos)", ventana: co.suscripcion.semanal)
+            BarraLimite(titulo: co.suscripcion.frontera.map { "Semanal · \($0.etiqueta)" } ?? "Semanal · modelo frontera",
+                        ventana: co.suscripcion.frontera,
+                        destacado: true)
+        }
+        .padding(.horizontal, 10).padding(.vertical, 9)
+    }
+
+    private var totales: some View {
+        HStack(spacing: 0) {
+            Metrica(titulo: "Tokens \(co.rango.rawValue.lowercased())",
+                    valor: Formato.tokens(co.raiz.tokens.total),
+                    detalle: "\(co.raiz.tokens.mensajes) mensajes")
+            Metrica(titulo: "Caché leída",
+                    valor: Formato.tokens(co.raiz.tokens.cacheLectura),
+                    detalle: porcentajeCache)
+            Metrica(titulo: "Salida",
+                    valor: Formato.tokens(co.raiz.tokens.salida),
+                    detalle: "entrada \(Formato.tokens(co.raiz.tokens.entrada))")
+            Metrica(titulo: "Carpetas",
+                    valor: "\(cuentaHojas(co.raiz))",
+                    detalle: "\(co.porModelo.count) modelos")
+        }
+        .padding(.horizontal, 10).padding(.vertical, 8)
+    }
+
+    private var selector: some View {
+        HStack(spacing: 8) {
+            Picker("", selection: $co.rango) {
+                ForEach(Rango.allCases) { r in Text(r.rawValue).tag(r) }
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            .controlSize(.small)
+
+            Picker("", selection: $pestana) {
+                Text("Carpetas").tag(0)
+                Text("Histórico").tag(1)
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            .controlSize(.small)
+            .frame(width: 140)
+        }
+        .padding(.horizontal, 10).padding(.vertical, 6)
+    }
+
+    private var pie: some View {
+        HStack(spacing: 6) {
+            if let e = co.error {
+                Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(Paleta.critico)
+                Text(e).lineLimit(1)
+            } else {
+                Text("Datos de Claude \(Formato.hace(co.suscripcion.leidoEn))")
+            }
+            Spacer()
+            Text("Revisado \(Formato.hace(co.ultimoRefresco))")
+        }
+        .font(.system(size: 9))
+        .foregroundStyle(.tertiary)
+        .padding(.horizontal, 10).padding(.vertical, 5)
+    }
+
+    // MARK: - Auxiliares
+
+    private var porcentajeCache: String {
+        let t = co.raiz.tokens.total
+        guard t > 0 else { return "—" }
+        return Formato.porcentaje(Double(co.raiz.tokens.cacheLectura) / Double(t) * 100) + " del total"
+    }
+
+    /// Cuenta rutas con consumo propio, que es lo que el usuario reconoce como
+    /// "carpetas donde trabajé".
+    private func cuentaHojas(_ n: NodoArbol) -> Int {
+        (n.propios.total > 0 ? 1 : 0) + n.hijos.reduce(0) { $0 + cuentaHojas($1) }
+    }
+}
