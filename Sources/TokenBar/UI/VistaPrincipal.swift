@@ -80,7 +80,7 @@ struct VistaPrincipal: View {
                 Image(systemName: "exclamationmark.triangle.fill")
                     .font(fuente(9))
                     .foregroundStyle(Paleta.aviso)
-                Text("Claude no refresca su medidor \(Formato.hace(co.suscripcion.leidoEn)): los porcentajes son de entonces y se quedaron cortos. El reloj de la sesión va estimado con tu actividad.")
+                Text("Claude no refresca su medidor \(Formato.hace(co.suscripcion.leidoEn)): los porcentajes son de entonces y se quedaron cortos. En la sesión van los tokens que gastaste en Claude Code y el reloj estimado con tu actividad.")
                     .font(fuente(9))
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)

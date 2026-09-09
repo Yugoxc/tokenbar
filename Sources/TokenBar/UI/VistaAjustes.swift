@@ -82,7 +82,8 @@ struct VistaAjustes: View {
             HStack(spacing: 5) {
                 Text(titulo).font(fuente(11))
                 if let v {
-                    Text(v.porcentaje.map { Formato.porcentaje($0) } ?? "—")
+                    Text(v.porcentaje.map { Formato.porcentaje($0) }
+                         ?? v.consumo.map { Formato.tokens($0) } ?? "—")
                         .font(fuente(10, .medium, mono: true))
                         .foregroundStyle(v.porcentaje.map { Paleta.semaforo($0) } ?? .secondary)
                     Text("· libera \(Formato.restante(v.reinicia, estimado: v.estimada))")

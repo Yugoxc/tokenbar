@@ -52,11 +52,15 @@ final class Almacen: @unchecked Sendable {
           pos INTEGER NOT NULL, mtime REAL NOT NULL
         ) WITHOUT ROWID;
 
-        -- Un instante por cada respuesta de la API. Es lo que permite deducir
-        -- dónde empieza y termina la ventana de 5 h cuando Claude deja de
-        -- refrescar la suya (ver Bloques). Con INTEGER PRIMARY KEY el segundo
-        -- ES el rowid: una fila por segundo con actividad, sin índice aparte.
-        CREATE TABLE IF NOT EXISTS actividad (segundo INTEGER PRIMARY KEY);
+        -- Un instante por cada respuesta de la API, con lo que costó. Permite
+        -- deducir dónde empieza y termina la ventana de 5 h cuando Claude deja
+        -- de refrescar la suya (ver Bloques) y, sobre todo, cuánto se lleva
+        -- consumido dentro de ella. Con INTEGER PRIMARY KEY el segundo ES el
+        -- rowid: una fila por segundo con actividad, sin índice aparte.
+        CREATE TABLE IF NOT EXISTS actividad (
+          segundo INTEGER PRIMARY KEY,
+          tokens INTEGER NOT NULL DEFAULT 0
+        );
 
         CREATE TABLE IF NOT EXISTS suscripcion (
           ts INTEGER PRIMARY KEY, plan TEXT,
@@ -77,6 +81,10 @@ final class Almacen: @unchecked Sendable {
     /// archivo, una base ya existente nunca la llenaría hacia atrás: se olvida
     /// hasta dónde se leyó cada archivo para forzar UNA relectura completa. No
     /// duplica nada, porque el conteo de tokens lo protege la tabla `vistos`.
+    ///
+    /// v2 — `actividad` gana la columna `tokens`. Se rehace vacía; quien la
+    /// vuelve a llenar es `Escaner.reconstruirActividad`, porque una relectura
+    /// normal chocaría contra `vistos` y no sumaría ni un token.
     private func migrar() {
         var st: OpaquePointer?
         var version: Int32 = 0
@@ -88,7 +96,47 @@ final class Almacen: @unchecked Sendable {
 
         if version < 1 {
             ejecutar("DELETE FROM archivos;")
-            ejecutar("PRAGMA user_version=1;")
+        }
+        if version < 2 {
+            ejecutar("DROP TABLE IF EXISTS actividad;")
+            ejecutar("""
+            CREATE TABLE actividad (
+              segundo INTEGER PRIMARY KEY,
+              tokens INTEGER NOT NULL DEFAULT 0
+            );
+            """)
+        }
+        if version < 2 { ejecutar("PRAGMA user_version=2;") }
+    }
+
+    /// `actividad` quedó vacía pero ya hay archivos leídos: es una base vieja
+    /// recién migrada, y hay que rehacerla desde los transcripts. En una
+    /// instalación nueva ambas están vacías y el escaneo normal las llena solo.
+    func debeReconstruirActividad() -> Bool {
+        func cuenta(_ tabla: String) -> Int {
+            var st: OpaquePointer?
+            defer { sqlite3_finalize(st) }
+            guard sqlite3_prepare_v2(db, "SELECT count(*) FROM \(tabla);", -1, &st, nil) == SQLITE_OK,
+                  sqlite3_step(st) == SQLITE_ROW else { return 0 }
+            return Int(sqlite3_column_int64(st, 0))
+        }
+        return cuenta("actividad") == 0 && cuenta("archivos") > 0
+    }
+
+    /// Reemplaza de una toda la tabla de actividad.
+    func reemplazarActividad(_ mapa: [Int: Int]) {
+        cola.sync {
+            ejecutar("BEGIN IMMEDIATE;")
+            ejecutar("DELETE FROM actividad;")
+            var st: OpaquePointer?
+            sqlite3_prepare_v2(db, "INSERT INTO actividad(segundo,tokens) VALUES(?,?);", -1, &st, nil)
+            for (seg, tk) in mapa {
+                sqlite3_bind_int64(st, 1, Int64(seg))
+                sqlite3_bind_int64(st, 2, Int64(tk))
+                sqlite3_step(st); sqlite3_reset(st)
+            }
+            sqlite3_finalize(st)
+            ejecutar("COMMIT;")
         }
     }
 
@@ -141,9 +189,13 @@ final class Almacen: @unchecked Sendable {
             sqlite3_finalize(stUso)
 
             var stAct: OpaquePointer?
-            sqlite3_prepare_v2(db, "INSERT OR IGNORE INTO actividad(segundo) VALUES(?);", -1, &stAct, nil)
-            for s in lote.segundos {
-                sqlite3_bind_int64(stAct, 1, Int64(s))
+            sqlite3_prepare_v2(db, """
+            INSERT INTO actividad(segundo,tokens) VALUES(?,?)
+            ON CONFLICT(segundo) DO UPDATE SET tokens=tokens+excluded.tokens;
+            """, -1, &stAct, nil)
+            for (seg, tk) in lote.actividad {
+                sqlite3_bind_int64(stAct, 1, Int64(seg))
+                sqlite3_bind_int64(stAct, 2, Int64(tk))
                 sqlite3_step(stAct); sqlite3_reset(stAct)
             }
             sqlite3_finalize(stAct)
@@ -202,17 +254,17 @@ final class Almacen: @unchecked Sendable {
         return out
     }
 
-    /// Instantes con actividad desde `desde` (epoch en segundos), en orden.
-    /// Se acota a propósito: para ubicar la ventana en curso no hace falta
-    /// arrastrar meses de historia.
-    func actividad(desde: Int) -> [Int] {
-        var out: [Int] = []
+    /// Instantes con actividad desde `desde` (epoch en segundos), en orden, con
+    /// los tokens que costó cada uno. Se acota a propósito: para ubicar la
+    /// ventana en curso no hace falta arrastrar meses de historia.
+    func actividad(desde: Int) -> [(segundo: Int, tokens: Int)] {
+        var out: [(segundo: Int, tokens: Int)] = []
         var st: OpaquePointer?
         defer { sqlite3_finalize(st) }
-        guard sqlite3_prepare_v2(db, "SELECT segundo FROM actividad WHERE segundo>=? ORDER BY segundo;", -1, &st, nil) == SQLITE_OK else { return out }
+        guard sqlite3_prepare_v2(db, "SELECT segundo,tokens FROM actividad WHERE segundo>=? ORDER BY segundo;", -1, &st, nil) == SQLITE_OK else { return out }
         sqlite3_bind_int64(st, 1, Int64(desde))
         while sqlite3_step(st) == SQLITE_ROW {
-            out.append(Int(sqlite3_column_int64(st, 0)))
+            out.append((Int(sqlite3_column_int64(st, 0)), Int(sqlite3_column_int64(st, 1))))
         }
         return out
     }

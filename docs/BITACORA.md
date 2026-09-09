@@ -11,6 +11,43 @@ Entrada nueva SIEMPRE al inicio. Plantilla:
 **Pendiente**: <lo que quedó fuera, o "nada">
 ```
 
+## 2026-09-09 — la sesión muestra los tokens del bloque, no un guion
+
+**Qué**: la tabla `actividad` gana la columna `tokens` y la ventana de sesión
+muestra, cuando no hay porcentaje, **los tokens que pasaron por Claude Code
+dentro del bloque de 5 h en curso** (`17,7 M ~4:31` en la barra, `17,7 M en
+~4:31` en el panel). Migración `user_version=2`: la tabla se rehace vacía y
+`Escaner.reconstruirActividad` la vuelve a llenar leyendo todos los transcripts
+con el dedup DENTRO de la pasada —contra `vistos` no sumaría ni un token—. El
+escaneo normal sigue apoyándose en `vistos`, que es lo correcto: ahí las líneas
+nuevas son mensajes nuevos.
+
+**Por qué**: el guion de la entrada anterior era honesto pero inútil ("pero ahora
+no me sale nada de consumo en la sesión"). Antes de esto se probó estimar el
+porcentaje calibrando tokens↔% con las dos lecturas reales que quedaban en la
+tabla `suscripcion`: dieron **4.717.298 y 227.688 tokens por punto de %**, 20× de
+diferencia. La razón está a la vista en la segunda muestra: el bloque abrió a las
+10:10 y el primer mensaje de Claude Code fue a las 10:43, o sea que buena parte
+de ese 3 % se gastó fuera. Un porcentaje inventado sobre esa base es peor que no
+darlo; los tokens del bloque, en cambio, son un número medido.
+
+**Cómo verificar**:
+```bash
+sqlite3 "$HOME/Library/Application Support/TokenBar/tokenbar.sqlite" \
+  "PRAGMA user_version; SELECT count(*), sum(tokens) FROM actividad;"
+```
+Debe decir 2, y la suma tiene que cuadrar con el total deduplicado de los
+transcripts que siguen en disco (9.705.835.234 al momento del cambio — menos que
+los 10.822.037.697 de `uso`, que arrastra transcripts que Claude ya borró).
+El consumo del bloque se contrastó a mano: 18,3 M en 149 mensajes desde las
+09:32:29, contra los 17,7 M que dibujó el panel un minuto antes.
+
+**Docs**: `CLAUDE.md`, `~/Desktop/TYD/proyectos/tokenbar.md`.
+
+**Pendiente**: el consumo solo cuenta lo que pasó por Claude Code; la ventana es
+de la cuenta completa. La barra de progreso de esa fila queda vacía a propósito:
+no hay fracción conocida que pintar.
+
 ## 2026-09-09 — el contador de sesión se quedó pegado: Claude dejó de refrescar su medidor
 
 **Qué**: el reloj de la ventana de 5 h ya no depende de que Claude Code

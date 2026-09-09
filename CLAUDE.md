@@ -48,8 +48,10 @@ El plan sale de `oauthAccount.organizationRateLimitTier`
 por horas (se le vio 22,7 h seguidas mientras reescribía el resto del archivo
 cada pocos minutos). Cuando su `resets_at` de la sesión ya pasó, la ventana de
 5 h vigente se deduce de la tabla `actividad` —un instante por respuesta de la
-API, sacado del `timestamp` de los transcripts— encadenando bloques de 5 h desde
-el último corte que Claude sí confirmó. Ver `Bloques.swift`.
+API, con lo que costó, sacado del `timestamp` de los transcripts— encadenando
+bloques de 5 h desde el último corte que Claude sí confirmó. Esa misma tabla da
+el consumo del bloque en curso, que es lo que se muestra donde iría el
+porcentaje. Ver `Bloques.swift`.
 
 ## Arquitectura
 
@@ -143,8 +145,19 @@ swiftc -O ${=FUENTES} /tmp/p/main.swift -o /tmp/prevtb && /tmp/prevtb /tmp
   con «~» en la interfaz.
 - **El porcentaje de una ventana vencida no se recicla.** `Ventana.porcentaje`
   es opcional a propósito: cuando la ventana en curso empezó después de la
-  última lectura de Claude, se muestra «—» y no se pinta la barra de progreso.
-  Un 3 % de la ventana anterior con cara de dato fresco es peor que no saber.
+  última lectura de Claude, en su lugar van los **tokens del bloque**
+  (`Ventana.consumo`) y la barra de progreso queda vacía. Un 3 % de la ventana
+  anterior con cara de dato fresco es peor que no saber.
+- **El porcentaje de la sesión no se puede estimar desde los tokens.** Se probó:
+  calibrando contra las dos lecturas reales que había, salieron 4.717.298 y
+  227.688 tokens por punto de %, 20× de diferencia. En la segunda el bloque abrió
+  a las 10:10 y el primer mensaje de Claude Code fue a las 10:43 — el resto se
+  gastó fuera. Por eso se muestran tokens medidos y no un porcentaje inventado.
+- **`actividad` no se puede rellenar con una relectura normal.** El escáner
+  dedupe contra `vistos`, así que en una relectura completa ningún mensaje viejo
+  volvería a aportar tokens y la tabla quedaría en ceros. Para eso está
+  `Escaner.reconstruirActividad`, que dedupe DENTRO de su propia pasada; se
+  dispara sola cuando `actividad` está vacía y `archivos` no.
 - **El instante de actividad se anota antes del dedup.** Una respuesta reescrita
   por un `--resume` no debe volver a sumar tokens, pero sí ocurrió: conserva su
   hora original y marca actividad real de la API. Si se anotara después del

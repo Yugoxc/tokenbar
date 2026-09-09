@@ -60,10 +60,14 @@ struct BarraLimite: View {
                             .font(fuente(11, .semibold, mono: true))
                             .foregroundStyle(Paleta.semaforo(pct))
                     } else {
-                        Text("—")
+                        // Sin porcentaje, los tokens del bloque: es lo único
+                        // medible y al menos dice si la sesión va cargada.
+                        Text(v.consumo.map { Formato.tokens($0) } ?? "—")
                             .font(fuente(11, .semibold, mono: true))
-                            .foregroundStyle(.tertiary)
-                            .help("Claude no ha reportado el consumo de esta ventana")
+                            .foregroundStyle(.secondary)
+                            .help(v.consumo == nil
+                                  ? "Claude no ha reportado el consumo de esta ventana"
+                                  : "Tokens que pasaron por Claude Code en esta ventana. No es el % del plan: la ventana también la gastan claude.ai, el escritorio y el móvil.")
                     }
                     Text(Formato.restante(v.reinicia, estimado: v.estimada))
                         .font(fuente(10))

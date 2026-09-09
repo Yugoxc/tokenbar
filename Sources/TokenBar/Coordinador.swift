@@ -106,9 +106,12 @@ final class Coordinador: ObservableObject {
 
         func agregar(_ etq: String, _ v: Ventana) {
             var t = p.mostrarEtiquetas ? etq + " " : ""
-            // Un guion cuando el porcentaje no se sabe: mostrar el de la
-            // ventana anterior sería mentir con cara de dato fresco.
-            t += v.porcentaje.map { "\(Int($0.rounded()))%" } ?? "—"
+            // Sin porcentaje se muestran los tokens del bloque: reciclar el % de
+            // la ventana anterior sería mentir con cara de dato fresco, pero
+            // dejar un guion pelado no le sirve a nadie.
+            t += v.porcentaje.map { "\(Int($0.rounded()))%" }
+                ?? v.consumo.map { Formato.tokens($0) }
+                ?? "—"
             // Cada ventana lleva su propio reloj: la de 5 h se libera en horas
             // y la semanal en días, y en ambas interesa saber cuánto falta.
             // El «~» avisa que el corte lo dedujimos nosotros, no Claude.
@@ -200,16 +203,31 @@ final class Coordinador: ObservableObject {
         let piso = min(ancla?.timeIntervalSince1970 ?? .greatestFiniteMagnitude,
                        ahora.timeIntervalSince1970 - 8 * 86_400)
         let actividad = almacen.actividad(desde: Int(piso))
-        e.ultimaActividad = actividad.last.map { Date(timeIntervalSince1970: TimeInterval($0)) }
+        e.ultimaActividad = actividad.last.map { Date(timeIntervalSince1970: TimeInterval($0.segundo)) }
 
-        // Mientras el dato de Claude siga vivo, manda él: es el real.
-        if let r = ancla, r > ahora { return e }
+        // Mientras el corte de Claude siga vivo manda él, que es el real; si ya
+        // venció, se usa el bloque deducido de la actividad.
+        let viva = ancla.map { $0 > ahora } ?? false
+        let fin = viva ? ancla
+                       : Bloques.abierto(actividad: actividad.map(\.segundo), ancla: ancla, ahora: ahora)?.fin
 
-        let bloque = Bloques.abierto(actividad: actividad, ancla: ancla, ahora: ahora)
+        // Lo único medible de la ventana: los tokens que pasaron por Claude Code
+        // desde que se abrió. No es el porcentaje del plan —la ventana también la
+        // gastan claude.ai, el escritorio y el móvil— pero es un número de verdad.
+        let consumo = fin.map { f -> Int in
+            let desdeBloque = f.timeIntervalSince1970 - Bloques.duracion
+            return actividad.reduce(0) { $0 + (TimeInterval($1.segundo) >= desdeBloque ? $1.tokens : 0) }
+        }
+
+        if viva {
+            e.sesion?.consumo = consumo
+            return e
+        }
         e.sesion = Ventana(porcentaje: nil,
-                           reinicia: bloque?.fin,
+                           reinicia: fin,
                            etiqueta: e.sesion?.etiqueta ?? "Sesión (5 h)",
-                           estimada: true)
+                           estimada: true,
+                           consumo: consumo)
         return e
     }
 

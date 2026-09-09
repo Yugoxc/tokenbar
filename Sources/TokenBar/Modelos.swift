@@ -59,6 +59,10 @@ struct Ventana: Equatable {
     /// `reinicia` no lo dio Claude: se dedujo de la actividad local (ver
     /// `Bloques`). La UI lo marca con «~» para no hacerlo pasar por exacto.
     var estimada: Bool = false
+    /// Tokens que este app vio gastarse dentro de la ventana. Es lo único
+    /// medible cuando Claude no da el porcentaje, y se muestra en su lugar.
+    /// Solo cuenta lo que pasó por Claude Code: la ventana es de la cuenta.
+    var consumo: Int?
 }
 
 /// Foto del estado de la suscripción leída de ~/.claude.json.

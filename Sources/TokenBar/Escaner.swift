@@ -17,12 +17,15 @@ struct LoteEscaneo {
     var agregados: [LlaveUso: Tokens] = [:]
     var vistos: [String] = []
     var archivos: [ArchivoLeido] = []
-    /// Epoch (segundos) de cada respuesta de la API vista en este lote. De acá
-    /// sale la ventana de 5 h cuando la de Claude queda vieja (ver `Bloques`).
-    var segundos: Set<Int> = []
+    /// Tokens por instante (epoch en segundos) de las respuestas de la API
+    /// vistas en este lote. De acá sale la ventana de 5 h cuando la de Claude
+    /// queda vieja, y cuánto se lleva gastado dentro (ver `Bloques`). Un
+    /// instante puede quedar en 0: la respuesta ya se había contado antes, pero
+    /// igual marcó actividad de la API.
+    var actividad: [Int: Int] = [:]
     var lineasNuevas = 0
 
-    var vacio: Bool { agregados.isEmpty && archivos.isEmpty && segundos.isEmpty }
+    var vacio: Bool { agregados.isEmpty && archivos.isEmpty && actividad.isEmpty }
 }
 
 /// Lee los transcripts de Claude Code y saca de ahí el consumo de tokens.
@@ -46,6 +49,10 @@ final class Escaner: @unchecked Sendable {
     /// Recorre todo lo pendiente. `progreso` recibe (procesados, total).
     @discardableResult
     func escanear(progreso: ((Int, Int) -> Void)? = nil) -> LoteEscaneo {
+        // Una base recién migrada trae `actividad` vacía y no se llenaría sola:
+        // el escaneo normal se apoya en `vistos` y no volvería a sumar tokens.
+        if almacen.debeReconstruirActividad() { reconstruirActividad() }
+
         var lote = LoteEscaneo()
         let fm = FileManager.default
         guard let carpetas = try? fm.contentsOfDirectory(at: Self.raiz, includingPropertiesForKeys: nil) else {
@@ -78,6 +85,30 @@ final class Escaner: @unchecked Sendable {
         }
         if !lote.vacio { almacen.aplicarLote(lote) }
         return lote
+    }
+
+    /// Rehace la tabla `actividad` leyendo todos los transcripts desde cero.
+    ///
+    /// El dedup se hace DENTRO de la pasada, contra un conjunto vacío, y no
+    /// contra el `vistos` que ya está en la base: si no, ningún mensaje viejo
+    /// volvería a aportar sus tokens y la tabla quedaría en ceros. El resto del
+    /// lote (agregados, archivos) se descarta a propósito — eso ya está contado.
+    private func reconstruirActividad() {
+        let guardados = vistos
+        vistos = []
+        defer { vistos = guardados }
+
+        var lote = LoteEscaneo()
+        let fm = FileManager.default
+        guard let carpetas = try? fm.contentsOfDirectory(at: Self.raiz, includingPropertiesForKeys: nil) else { return }
+        for carpeta in carpetas {
+            guard let archivos = try? fm.contentsOfDirectory(at: carpeta, includingPropertiesForKeys: [.fileSizeKey]) else { continue }
+            for url in archivos where url.pathExtension == "jsonl" {
+                let tam = Int64((try? url.resourceValues(forKeys: [.fileSizeKey]))?.fileSize ?? 0)
+                procesar(url: url, tam: tam, desde: 0, mtime: 0, lote: &lote)
+            }
+        }
+        almacen.reemplazarActividad(lote.actividad)
     }
 
     // MARK: - Lectura de un archivo
@@ -123,11 +154,12 @@ final class Escaner: @unchecked Sendable {
               let uso = mensaje["usage"] as? [String: Any] else { return }
 
         let marca = raiz["timestamp"] as? String
+        let segundo = Self.instante(marca)
 
         // El instante se anota ANTES del dedup: al reanudar o compactar, la
         // misma respuesta se reescribe conservando su hora original, así que
         // aunque no se vuelva a sumar sí sigue marcando actividad de la API.
-        if let s = Self.instante(marca) { lote.segundos.insert(s) }
+        if let segundo, lote.actividad[segundo] == nil { lote.actividad[segundo] = 0 }
 
         // Dedup: el mismo mensaje reaparece al reanudar o compactar una sesión.
         let idMensaje = mensaje["id"] as? String
@@ -144,6 +176,7 @@ final class Escaner: @unchecked Sendable {
                         cacheLectura: uso["cache_read_input_tokens"] as? Int ?? 0,
                         mensajes: 1)
         if tk.total == 0 { return }
+        if let segundo { lote.actividad[segundo, default: 0] += tk.total }
 
         let llave = LlaveUso(dia: dia(de: marca),
                              cwd: (raiz["cwd"] as? String) ?? "(sin carpeta)",
