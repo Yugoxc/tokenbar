@@ -72,15 +72,36 @@ struct VistaPrincipal: View {
     /// Claude Code solo reescribe `cachedUsageUtilization` mientras responde, y
     /// a veces deja de hacerlo por horas: los porcentajes se quedan quietos y el
     /// reloj de la ventana de 5 h se clava. Sin este cartel, la barra parece
-    /// simplemente rota. Solo aparece si hubo trabajo DESPUÉS de la última
-    /// lectura: si nadie usó Claude, el dato viejo sigue siendo correcto.
+    /// simplemente rota.
+    ///
+    /// Son dos cosas distintas y no siempre pasan juntas, así que cada frase se
+    /// arma sola: los porcentajes se quedan cortos si hubo trabajo DESPUÉS de la
+    /// última lectura (`rezagada`), y la sesión pasa a estimarse solo cuando el
+    /// corte que dio Claude ya venció (`sesion.estimada`). Antes el cartel
+    /// prometía un reloj estimado que a veces no lo era, y callaba justo cuando
+    /// sí lo era.
+    private var textoAviso: String? {
+        let viejos = co.suscripcion.rezagada
+        let estimado = co.suscripcion.sesion?.estimada == true
+        var frases: [String] = []
+        if viejos {
+            frases.append("Claude no refresca su medidor \(Formato.hace(co.suscripcion.leidoEn)): los porcentajes son de entonces y se quedaron cortos.")
+        }
+        if estimado {
+            frases.append(viejos
+                ? "En la sesión van los tokens que gastaste en Claude Code y el reloj estimado con tu actividad."
+                : "La ventana de 5 h que dio Claude ya venció: en la sesión van los tokens que gastaste en Claude Code y el reloj estimado con tu actividad.")
+        }
+        return frases.isEmpty ? nil : frases.joined(separator: " ")
+    }
+
     @ViewBuilder private var aviso: some View {
-        if co.suscripcion.rezagada {
+        if let texto = textoAviso {
             HStack(alignment: .top, spacing: 6) {
                 Image(systemName: "exclamationmark.triangle.fill")
                     .font(fuente(9))
                     .foregroundStyle(Paleta.aviso)
-                Text("Claude no refresca su medidor \(Formato.hace(co.suscripcion.leidoEn)): los porcentajes son de entonces y se quedaron cortos. En la sesión van los tokens que gastaste en Claude Code y el reloj estimado con tu actividad.")
+                Text(texto)
                     .font(fuente(9))
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)

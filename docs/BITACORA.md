@@ -11,6 +11,99 @@ Entrada nueva SIEMPRE al inicio. Plantilla:
 **Pendiente**: <lo que quedó fuera, o "nada">
 ```
 
+## 2026-09-09 — el propio arreglo contaba doble: la migración ahora la manda la versión del esquema
+
+**Qué**: `reconstruirActividad()` pasa a correr **después** del escaneo, y la
+señal de "falta reconstruir" deja de adivinarse con conteos de tablas: la lleva
+`user_version`, que **no sube hasta que la reconstrucción termina**
+(`Almacen.esquemaActual`, hoy 4). Una base nueva se marca al día de inmediato,
+porque no tiene historia que rehacer.
+
+**Por qué**: al contrastar el resultado de la entrada anterior contra la verdad
+de terreno saltó que `actividad` sumaba **14.762.733.453 tokens cuando la verdad
+eran 12.248.231.823** — exactamente los 2,5 MM de los subagentes, contados dos
+veces. La reconstrucción corría al principio del escaneo y reemplazaba la tabla
+entera; después, en la misma pasada, el escaneo normal descubría los 1.487
+archivos de subagentes —que no estaban en `archivos`— y les volvía a sumar los
+tokens encima con el `ON CONFLICT … tokens=tokens+excluded.tokens`.
+
+De paso quedó claro que adivinar el estado de una migración con `count(*)` no
+sirve: preguntándole a `archivos` nunca daba true (la migración la vaciaba) y
+preguntándole a `actividad` dejaba de dar true en cuanto el escaneo metía la
+primera fila. La versión del esquema no se presta a esas ambigüedades, y como
+sube al final, un app que muera en medio reintenta en la próxima partida.
+
+**Cómo verificar**: la suma de `actividad.tokens` tiene que coincidir con el
+total deduplicado de todos los `.jsonl` bajo `~/.claude/projects` (recursivo,
+dedup por `id|requestId`). Se comparan a mano; no debe haber diferencia
+apreciable más allá de lo que se haya gastado entre una medición y la otra.
+
+**Docs**: `CLAUDE.md`.
+
+**Pendiente**: nada.
+
+## 2026-09-09 — seis defectos que encontró una revisión adversarial
+
+Cuatro agentes revisaron el arreglo del contador por lentes distintas
+(corrección, persistencia, concurrencia/UI, honestidad) y cada hallazgo pasó por
+verificadores que intentaron refutarlo. Sobrevivieron seis. Los tres primeros son
+de fondo.
+
+**1. El escáner no entraba a los transcripts de subagentes** (`Escaner.swift`).
+El recorrido era de dos niveles fijos, pero Claude Code guarda los transcripts de
+subagentes en `<proyecto>/<sesión>/subagents/` y los de workflows un nivel más
+abajo. De **2.470 archivos se abrían 983**: quedaban fuera **20,5 % de los
+tokens (2.502.269.326) y 36,5 % de los mensajes (23.134)**. Ahora hay un
+`Escaner.transcripts()` con `FileManager.enumerator` recursivo, que usan tanto el
+escaneo como la reconstrucción. Es un defecto viejo —vivía desde la primera
+versión— pero recién ahora dolía de verdad: subestimaba el consumo del bloque.
+
+**2. La reconstrucción de `actividad` no corría nunca al actualizar**
+(`Almacen.swift`). `debeReconstruirActividad()` exigía `archivos > 0`, pero la
+migración v1 acababa de hacer `DELETE FROM archivos` en la misma llamada. Para
+cualquier base que viniera de la versión publicada, el guardia daba falso, la
+reconstrucción se saltaba, y la relectura normal chocaba contra `vistos` antes de
+sumar tokens: la columna nacía **en cero para toda la historia**. Esta máquina se
+salvó por casualidad, porque alcanzó a correr la build intermedia. Ahora la
+pregunta se le hace a `vistos`, que es lo que de verdad bloquea el reconteo, y el
+`DELETE FROM archivos` se fue: ya no aportaba nada y obligaba a leer todo dos
+veces.
+
+**3. La estimación no era un techo** (`Bloques.swift`). El comentario prometía
+que el tiempo mostrado nunca se pasaba. Falso: cada eslabón arranca igual o más
+tarde que el real, pero la cadena estimada tiene MENOS eslabones, así que si la
+actividad invisible ya abrió un bloque más, acá seguimos en el anterior y el
+corte sale horas antes del verdadero. Corregida la afirmación en el código, en
+`CLAUDE.md` y en la ficha de TYD.
+
+**4. El reloj clavado en 0:00 seguía vivo en la semanal y la del modelo
+frontera** (`Coordinador.swift`). Esas dos no se estiman, así que cuando su
+`resets_at` vence vuelve exactamente el síntoma original. Ahora el reloj solo se
+anexa si el corte sigue en el futuro.
+
+**5. El cartel de aviso prometía cosas que no siempre pasaban**
+(`UI/VistaPrincipal.swift`). Su condición (`rezagada`) no coincidía con la que
+manda el reemplazo del reloj (`sesion.estimada`): afirmaba «reloj estimado»
+cuando el de Claude seguía vivo, y callaba cuando sí estaba estimado. Ahora cada
+frase se arma por su cuenta.
+
+**Migración v3**: `actividad` se rehace vacía para que la reconstrucción la
+vuelva a llenar con el recorrido recursivo.
+
+**Cómo verificar**:
+```bash
+sqlite3 "$HOME/Library/Application Support/TokenBar/tokenbar.sqlite" \
+  "PRAGMA user_version; SELECT count(*), sum(tokens>0), sum(tokens) FROM actividad;"
+```
+`user_version` debe decir 3 y la suma tiene que acercarse a los 12.221.192.205
+tokens que dan los 2.470 transcripts deduplicados por `id|requestId` (contra los
+9.718.922.879 que daban los 983 de antes).
+
+**Docs**: `CLAUDE.md`, `~/Desktop/TYD/proyectos/tokenbar.md`.
+
+**Pendiente**: nada de la revisión. Queda anotado que el árbol de carpetas ahora
+también refleja lo que gastaron los subagentes, que antes no se veía.
+
 ## 2026-09-09 — el consumo de la sesión salía negro en la barra
 
 **Qué**: `Paleta.sinDato` (azul, `0.45 / 0.66 / 0.90`) reemplaza al `.secondary`

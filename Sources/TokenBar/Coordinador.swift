@@ -115,7 +115,12 @@ final class Coordinador: ObservableObject {
             // Cada ventana lleva su propio reloj: la de 5 h se libera en horas
             // y la semanal en días, y en ambas interesa saber cuánto falta.
             // El «~» avisa que el corte lo dedujimos nosotros, no Claude.
-            if p.mostrarRestante, let r = v.reinicia {
+            //
+            // Solo se anexa si el corte sigue en el futuro: `Formato.reloj` topa
+            // en 0:00, así que una ventana ya vencida —la semanal o la del
+            // modelo frontera, que no se estiman— dejaba un contador clavado en
+            // cero, el mismo síntoma que este arreglo vino a resolver.
+            if p.mostrarRestante, let r = v.reinicia, r > Date() {
                 t += "  " + (v.estimada ? "~" : "") + Formato.reloj(r)
             }
             partes.append((t, v.porcentaje))

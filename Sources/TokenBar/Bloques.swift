@@ -8,10 +8,13 @@ import Foundation
 /// clava en `0:00`. Encadenando bloques de 5 h desde el último corte que Claude
 /// sí confirmó se recupera un reloj que avanza.
 ///
-/// Es una estimación, no la verdad. La ventana es de la cuenta completa y
-/// también la abren claude.ai, la app de escritorio o el móvil, que no dejan
-/// rastro en los transcripts: el bloque estimado puede empezar más tarde que el
-/// real —nunca antes—, así que el tiempo que muestra es un techo.
+/// Es una estimación, no la verdad, y **puede quedar corta o larga**. La ventana
+/// es de la cuenta completa y también la abren claude.ai, la app de escritorio o
+/// el móvil, que no dejan rastro en los transcripts. Cada eslabón de la cadena
+/// arranca igual o más tarde que el real, pero la cadena estimada tiene MENOS
+/// eslabones: si la actividad invisible ya abrió un bloque más, acá seguimos en
+/// el anterior y el corte sale horas antes del verdadero. Por eso va con «~» y
+/// no se presenta como garantía.
 enum Bloques {
     static let duracion: TimeInterval = 5 * 3600
 

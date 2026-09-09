@@ -49,33 +49,20 @@ final class Escaner: @unchecked Sendable {
     /// Recorre todo lo pendiente. `progreso` recibe (procesados, total).
     @discardableResult
     func escanear(progreso: ((Int, Int) -> Void)? = nil) -> LoteEscaneo {
-        // Una base recién migrada trae `actividad` vacía y no se llenaría sola:
-        // el escaneo normal se apoya en `vistos` y no volvería a sumar tokens.
-        if almacen.debeReconstruirActividad() { reconstruirActividad() }
-
         var lote = LoteEscaneo()
-        let fm = FileManager.default
-        guard let carpetas = try? fm.contentsOfDirectory(at: Self.raiz, includingPropertiesForKeys: nil) else {
-            return lote
-        }
 
         var pendientes: [(URL, Int64, Int64, Double)] = []   // url, tam, desde, mtime
-        for carpeta in carpetas {
-            guard let archivos = try? fm.contentsOfDirectory(
-                at: carpeta,
-                includingPropertiesForKeys: [.fileSizeKey, .contentModificationDateKey]) else { continue }
-            for url in archivos where url.pathExtension == "jsonl" {
-                let attrs = try? url.resourceValues(forKeys: [.fileSizeKey, .contentModificationDateKey])
-                let tam = Int64(attrs?.fileSize ?? 0)
-                let mtime = attrs?.contentModificationDate?.timeIntervalSince1970 ?? 0
-                var desde: Int64 = 0
-                if let previo = almacen.estadoArchivo(url.path) {
-                    if previo.tam == tam { continue }              // sin cambios
-                    // Si encogió, el archivo se reescribió: hay que releerlo entero.
-                    desde = tam >= previo.tam ? previo.pos : 0
-                }
-                pendientes.append((url, tam, desde, mtime))
+        for url in Self.transcripts() {
+            let attrs = try? url.resourceValues(forKeys: [.fileSizeKey, .contentModificationDateKey])
+            let tam = Int64(attrs?.fileSize ?? 0)
+            let mtime = attrs?.contentModificationDate?.timeIntervalSince1970 ?? 0
+            var desde: Int64 = 0
+            if let previo = almacen.estadoArchivo(url.path) {
+                if previo.tam == tam { continue }              // sin cambios
+                // Si encogió, el archivo se reescribió: hay que releerlo entero.
+                desde = tam >= previo.tam ? previo.pos : 0
             }
+            pendientes.append((url, tam, desde, mtime))
         }
 
         let total = pendientes.count
@@ -84,7 +71,40 @@ final class Escaner: @unchecked Sendable {
             progreso?(i + 1, total)
         }
         if !lote.vacio { almacen.aplicarLote(lote) }
+
+        // Una base recién migrada trae `actividad` vacía y no se llenaría sola:
+        // el escaneo normal se apoya en `vistos` y no volvería a sumar tokens.
+        //
+        // Va DESPUÉS del escaneo, no antes: `reconstruirActividad` reemplaza la
+        // tabla completa, así que corriendo primero el escaneo le sumaba encima
+        // los tokens de cada archivo que aún no estaba registrado en `archivos`
+        // —los de subagentes, recién descubiertos— y quedaban contados dos veces
+        // (14,76 MM en vez de 12,25 MM). Reemplazar al final deja la tabla como
+        // única verdad.
+        if almacen.debeReconstruirActividad() {
+            reconstruirActividad()
+            almacen.marcarEsquemaAlDia()
+        }
         return lote
+    }
+
+    /// Todos los `.jsonl` bajo `~/.claude/projects`, a cualquier profundidad.
+    ///
+    /// Tiene que ser recursivo: además de `<proyecto>/<sesión>.jsonl`, Claude
+    /// Code guarda los transcripts de subagentes en
+    /// `<proyecto>/<sesión>/subagents/` y los de workflows un nivel más abajo.
+    /// Con el recorrido de dos niveles que había, de 2.470 archivos se abrían
+    /// 983: quedaban fuera **20,5 % de los tokens y 36,5 % de los mensajes**.
+    static func transcripts() -> [URL] {
+        let claves: [URLResourceKey] = [.fileSizeKey, .contentModificationDateKey, .isRegularFileKey]
+        guard let it = FileManager.default.enumerator(
+            at: raiz, includingPropertiesForKeys: claves, options: [.skipsHiddenFiles]) else { return [] }
+        var out: [URL] = []
+        for caso in it {
+            guard let url = caso as? URL, url.pathExtension == "jsonl" else { continue }
+            out.append(url)
+        }
+        return out
     }
 
     /// Rehace la tabla `actividad` leyendo todos los transcripts desde cero.
@@ -99,14 +119,9 @@ final class Escaner: @unchecked Sendable {
         defer { vistos = guardados }
 
         var lote = LoteEscaneo()
-        let fm = FileManager.default
-        guard let carpetas = try? fm.contentsOfDirectory(at: Self.raiz, includingPropertiesForKeys: nil) else { return }
-        for carpeta in carpetas {
-            guard let archivos = try? fm.contentsOfDirectory(at: carpeta, includingPropertiesForKeys: [.fileSizeKey]) else { continue }
-            for url in archivos where url.pathExtension == "jsonl" {
-                let tam = Int64((try? url.resourceValues(forKeys: [.fileSizeKey]))?.fileSize ?? 0)
-                procesar(url: url, tam: tam, desde: 0, mtime: 0, lote: &lote)
-            }
+        for url in Self.transcripts() {
+            let tam = Int64((try? url.resourceValues(forKeys: [.fileSizeKey]))?.fileSize ?? 0)
+            procesar(url: url, tam: tam, desde: 0, mtime: 0, lote: &lote)
         }
         almacen.reemplazarActividad(lote.actividad)
     }

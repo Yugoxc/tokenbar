@@ -77,50 +77,68 @@ final class Almacen: @unchecked Sendable {
 
     /// Migraciones de esquema, numeradas en `PRAGMA user_version`.
     ///
-    /// v1 — nace `actividad`. Como el escáner solo mira la cola nueva de cada
-    /// archivo, una base ya existente nunca la llenaría hacia atrás: se olvida
-    /// hasta dónde se leyó cada archivo para forzar UNA relectura completa. No
-    /// duplica nada, porque el conteo de tokens lo protege la tabla `vistos`.
+    /// Historia del esquema:
     ///
-    /// v2 — `actividad` gana la columna `tokens`. Se rehace vacía; quien la
-    /// vuelve a llenar es `Escaner.reconstruirActividad`, porque una relectura
-    /// normal chocaría contra `vistos` y no sumaría ni un token.
-    private func migrar() {
-        var st: OpaquePointer?
-        var version: Int32 = 0
-        if sqlite3_prepare_v2(db, "PRAGMA user_version;", -1, &st, nil) == SQLITE_OK,
-           sqlite3_step(st) == SQLITE_ROW {
-            version = sqlite3_column_int(st, 0)
-        }
-        sqlite3_finalize(st)
+    /// - v1: nace `actividad`.
+    /// - v2: `actividad` gana la columna `tokens`.
+    /// - v3: el escáner pasa a recorrer los subdirectorios (transcripts de
+    ///   subagentes y workflows: 20 % de los tokens que no se veían).
+    /// - v4: `actividad` se rehace porque la v3 la dejó inflada — la
+    ///   reconstrucción corría ANTES del escaneo y este volvía a sumar encima
+    ///   los archivos recién descubiertos.
+    ///
+    /// En todas, `actividad` se rehace vacía y quien la vuelve a llenar es
+    /// `Escaner.reconstruirActividad`. Una relectura normal no serviría:
+    /// chocaría contra `vistos` y no sumaría ni un token.
+    ///
+    /// **`user_version` no sube acá**, salvo en una base nueva: la sube el
+    /// escáner cuando termina de rellenar la tabla. Si el app muere en medio, la
+    /// próxima partida vuelve a intentarlo en vez de quedarse a medias.
+    static let esquemaActual: Int32 = 4
 
-        if version < 1 {
-            ejecutar("DELETE FROM archivos;")
-        }
-        if version < 2 {
-            ejecutar("DROP TABLE IF EXISTS actividad;")
-            ejecutar("""
-            CREATE TABLE actividad (
-              segundo INTEGER PRIMARY KEY,
-              tokens INTEGER NOT NULL DEFAULT 0
-            );
-            """)
-        }
-        if version < 2 { ejecutar("PRAGMA user_version=2;") }
+    private func migrar() {
+        guard versionEsquema() < Self.esquemaActual else { return }
+        ejecutar("DROP TABLE IF EXISTS actividad;")
+        ejecutar("""
+        CREATE TABLE actividad (
+          segundo INTEGER PRIMARY KEY,
+          tokens INTEGER NOT NULL DEFAULT 0
+        );
+        """)
+        // Base nueva: no hay historia que reconstruir. El escaneo la llena solo,
+        // porque no hay nada en `vistos` que el dedup pueda frenar.
+        if cuenta("vistos") == 0 { marcarEsquemaAlDia() }
     }
 
-    /// `actividad` quedó vacía pero ya hay archivos leídos: es una base vieja
-    /// recién migrada, y hay que rehacerla desde los transcripts. En una
-    /// instalación nueva ambas están vacías y el escaneo normal las llena solo.
+    private func cuenta(_ tabla: String) -> Int {
+        var st: OpaquePointer?
+        defer { sqlite3_finalize(st) }
+        guard sqlite3_prepare_v2(db, "SELECT count(*) FROM \(tabla);", -1, &st, nil) == SQLITE_OK,
+              sqlite3_step(st) == SQLITE_ROW else { return 0 }
+        return Int(sqlite3_column_int64(st, 0))
+    }
+
+    func versionEsquema() -> Int32 {
+        var st: OpaquePointer?
+        defer { sqlite3_finalize(st) }
+        guard sqlite3_prepare_v2(db, "PRAGMA user_version;", -1, &st, nil) == SQLITE_OK,
+              sqlite3_step(st) == SQLITE_ROW else { return 0 }
+        return sqlite3_column_int(st, 0)
+    }
+
+    func marcarEsquemaAlDia() {
+        ejecutar("PRAGMA user_version=\(Self.esquemaActual);")
+    }
+
+    /// Hay una migración a medio terminar: falta rellenar `actividad`.
+    ///
+    /// Antes esto se adivinaba mirando conteos de tablas y salía mal dos veces:
+    /// preguntándole a `archivos` —que la propia migración vaciaba— nunca daba
+    /// true, y preguntándole a `actividad` dejaba de dar true en cuanto el
+    /// escaneo metía la primera fila. La versión del esquema no se presta a esas
+    /// ambigüedades.
     func debeReconstruirActividad() -> Bool {
-        func cuenta(_ tabla: String) -> Int {
-            var st: OpaquePointer?
-            defer { sqlite3_finalize(st) }
-            guard sqlite3_prepare_v2(db, "SELECT count(*) FROM \(tabla);", -1, &st, nil) == SQLITE_OK,
-                  sqlite3_step(st) == SQLITE_ROW else { return 0 }
-            return Int(sqlite3_column_int64(st, 0))
-        }
-        return cuenta("actividad") == 0 && cuenta("archivos") > 0
+        versionEsquema() < Self.esquemaActual
     }
 
     /// Reemplaza de una toda la tabla de actividad.

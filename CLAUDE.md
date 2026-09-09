@@ -34,7 +34,7 @@ Dos fuentes, ambas de solo lectura. **Este app nunca escribe en `~/.claude`.**
 
 | Dato | Fuente | Detalle |
 |---|---|---|
-| Tokens por carpeta / día / modelo | `~/.claude/projects/*/*.jsonl` | Cada línea `assistant` trae `message.usage` y el `cwd` real de la sesión |
+| Tokens por carpeta / día / modelo | `~/.claude/projects/**/*.jsonl` | Cada línea `assistant` trae `message.usage` y el `cwd` real de la sesión |
 | Sesión 5 h, semanal, modelo frontera, plan | `~/.claude.json` | Claves `cachedUsageUtilization` y `oauthAccount` |
 
 `cachedUsageUtilization.utilization` trae `five_hour` y `seven_day` sueltos, y un
@@ -145,9 +145,11 @@ swiftc -O ${=FUENTES} /tmp/p/main.swift -o /tmp/prevtb && /tmp/prevtb /tmp
 - **La ventana de 5 h es de la cuenta, no de Claude Code.** Se comprobó con dos
   cortes que reportó Claude (09-07 22:29:59 y 09-08 10:10:00 local): ninguno
   tiene línea en los transcripts, o sea que claude.ai, la app de escritorio o el
-  móvil también la abren. La estimación de `Bloques` puede empezar más tarde que
-  la real —nunca antes—, así que el tiempo que muestra es un techo, y por eso va
-  con «~» en la interfaz.
+  móvil también la abren. La estimación de `Bloques` **puede quedar corta o
+  larga**: cada eslabón arranca igual o más tarde que el real, pero la cadena
+  estimada tiene menos eslabones, así que si la actividad invisible ya abrió un
+  bloque más, acá seguimos en el anterior y el corte sale antes del verdadero.
+  Por eso va con «~» y no se presenta como garantía.
 - **El porcentaje de una ventana vencida no se recicla.** `Ventana.porcentaje`
   es opcional a propósito: cuando la ventana en curso empezó después de la
   última lectura de Claude, en su lugar van los **tokens del bloque**
@@ -158,6 +160,24 @@ swiftc -O ${=FUENTES} /tmp/p/main.swift -o /tmp/prevtb && /tmp/prevtb /tmp
   227.688 tokens por punto de %, 20× de diferencia. En la segunda el bloque abrió
   a las 10:10 y el primer mensaje de Claude Code fue a las 10:43 — el resto se
   gastó fuera. Por eso se muestran tokens medidos y no un porcentaje inventado.
+- **Los transcripts no están todos a dos niveles.** Además de
+  `<proyecto>/<sesión>.jsonl`, Claude Code guarda los de subagentes en
+  `<proyecto>/<sesión>/subagents/` y los de workflows un nivel más abajo. Con el
+  recorrido de dos niveles que había, de 2.470 archivos se abrían 983: quedaban
+  fuera **20,5 % de los tokens y 36,5 % de los mensajes**. Por eso
+  `Escaner.transcripts()` usa `FileManager.enumerator` recursivo, y tanto el
+  escaneo como la reconstrucción pasan por ahí.
+- **El estado de una migración lo lleva `user_version`, no un `count(*)`.**
+  Adivinarlo con conteos falló dos veces: preguntándole a `archivos` nunca daba
+  true —la propia migración la vaciaba— y preguntándole a `actividad` dejaba de
+  dar true apenas el escaneo metía la primera fila. Hoy manda
+  `Almacen.esquemaActual`, y **sube solo cuando la reconstrucción terminó**: si
+  el app muere en medio, la próxima partida reintenta. Una base nueva se marca al
+  día de inmediato, porque no hay historia que rehacer.
+- **La reconstrucción va después del escaneo.** `reconstruirActividad` reemplaza
+  la tabla entera; corriendo primero, el escaneo le sumaba encima los tokens de
+  todo archivo que aún no estuviera en `archivos` y quedaban contados dos veces
+  (14,76 MM en vez de 12,25 MM la vez que pasó).
 - **`actividad` no se puede rellenar con una relectura normal.** El escáner
   dedupe contra `vistos`, así que en una relectura completa ningún mensaje viejo
   volvería a aportar tokens y la tabla quedaría en ceros. Para eso está
