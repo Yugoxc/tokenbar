@@ -23,6 +23,16 @@ enum Paleta {
     static let critico = Color(red: 0.89, green: 0.35, blue: 0.35)
     static let acento = Color(red: 0.83, green: 0.45, blue: 0.28)   // naranjo Claude
 
+    /// Para lo que no tiene porcentaje (los tokens del bloque de 5 h).
+    ///
+    /// No puede ser `.secondary`: la barra de menús se dibuja a imagen con el
+    /// color quemado (`isTemplate = false`) y el renderizador resuelve los
+    /// colores del sistema en modo claro, así que sale casi negro y desaparece
+    /// contra una barra oscura. Este azul se lee en ambos modos y, al quedar
+    /// fuera de la escala verde→rojo, no se confunde con un nivel de límite.
+
+    static let sinDato = Color(red: 0.45, green: 0.66, blue: 0.90)
+
     /// Verde → amarillo → rojo de forma continua: el color se mueve con el
     /// porcentaje en vez de saltar por tramos, así se nota que va subiendo.
     static func semaforo(_ pct: Double) -> Color {
@@ -64,7 +74,7 @@ struct BarraLimite: View {
                         // medible y al menos dice si la sesión va cargada.
                         Text(v.consumo.map { Formato.tokens($0) } ?? "—")
                             .font(fuente(11, .semibold, mono: true))
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(v.consumo == nil ? AnyShapeStyle(.tertiary) : AnyShapeStyle(Paleta.sinDato))
                             .help(v.consumo == nil
                                   ? "Claude no ha reportado el consumo de esta ventana"
                                   : "Tokens que pasaron por Claude Code en esta ventana. No es el % del plan: la ventana también la gastan claude.ai, el escritorio y el móvil.")

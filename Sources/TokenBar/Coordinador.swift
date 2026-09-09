@@ -132,11 +132,11 @@ final class Coordinador: ObservableObject {
                 agregar(String(v.etiqueta.prefix(4)), v)
             }
         }
-        guard !partes.isEmpty else { return [LineaBarra(texto: "—", color: .secondary)] }
+        guard !partes.isEmpty else { return [LineaBarra(texto: "—", color: Paleta.sinDato)] }
 
-        // Sin porcentaje no hay semáforo que valga: gris, que es el color de
-        // «no sé», y no un verde que se leería como «vas holgado».
-        func color(_ pct: Double?) -> Color { pct.map(Paleta.semaforo) ?? .secondary }
+        // Sin porcentaje no hay semáforo que valga: el azul neutro de «esto no
+        // es un nivel de límite», y no un verde que se leería como «vas holgado».
+        func color(_ pct: Double?) -> Color { pct.map(Paleta.semaforo) ?? Paleta.sinDato }
 
         if partes.count <= 2 {
             return partes.map { LineaBarra(texto: $0.texto, color: color($0.pct)) }

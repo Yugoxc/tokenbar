@@ -11,6 +11,26 @@ Entrada nueva SIEMPRE al inicio. Plantilla:
 **Pendiente**: <lo que quedó fuera, o "nada">
 ```
 
+## 2026-09-09 — el consumo de la sesión salía negro en la barra
+
+**Qué**: `Paleta.sinDato` (azul, `0.45 / 0.66 / 0.90`) reemplaza al `.secondary`
+que llevaba la línea sin porcentaje, tanto en la barra como en el panel.
+
+**Por qué**: "el color de la sesión de 5 hrs está en negro así que no se ve
+bien". El label de la barra se dibuja a imagen con `isTemplate = false`, y el
+renderizador resuelve los colores del sistema en modo claro: `.secondary` sale
+gris oscuro y **desaparece** contra una barra de menús oscura. Se renderizaron
+siete candidatos sobre negro y sobre blanco; el azul es el único que se lee bien
+en los dos y además queda fuera de la escala verde→rojo, así que no se confunde
+con un nivel de límite (el naranjo acento sí se confundía con `Paleta.alto`).
+
+**Cómo verificar**: dibujar `EtiquetaBarra.imagen(co.lineasBarra(prefs), …)`
+sobre fondo negro y blanco. Las dos líneas tienen que leerse en ambos.
+
+**Docs**: `CLAUDE.md`.
+
+**Pendiente**: nada.
+
 ## 2026-09-09 — la sesión muestra los tokens del bloque, no un guion
 
 **Qué**: la tabla `actividad` gana la columna `tokens` y la ventana de sesión

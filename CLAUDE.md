@@ -123,6 +123,11 @@ swiftc -O ${=FUENTES} /tmp/p/main.swift -o /tmp/prevtb && /tmp/prevtb /tmp
 - **`MenuBarExtra` descarta el color del label**: lo trata como imagen template.
   Por eso `EtiquetaBarra.imagen` lo renderiza con `ImageRenderer` y marca
   `isTemplate = false`; así el semáforo se ve en la barra.
+- **En la barra no sirven los colores del sistema.** Como el color queda quemado
+  en la imagen y `ImageRenderer` los resuelve en modo claro, un `.secondary` sale
+  gris oscuro y desaparece contra una barra oscura. Todo lo que va en la barra
+  usa colores explícitos: el semáforo, o `Paleta.sinDato` para lo que no tiene
+  porcentaje.
 - **La barra de menús da ~22 pt de alto**: caben dos líneas, no tres. Con las
   tres ventanas activas, las dos últimas comparten línea (ver `lineasBarra`).
 - **`ImageRenderer` no dibuja el contenido de un `ScrollView`** (sale en blanco).
