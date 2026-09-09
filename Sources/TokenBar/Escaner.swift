@@ -17,9 +17,12 @@ struct LoteEscaneo {
     var agregados: [LlaveUso: Tokens] = [:]
     var vistos: [String] = []
     var archivos: [ArchivoLeido] = []
+    /// Epoch (segundos) de cada respuesta de la API vista en este lote. De acá
+    /// sale la ventana de 5 h cuando la de Claude queda vieja (ver `Bloques`).
+    var segundos: Set<Int> = []
     var lineasNuevas = 0
 
-    var vacio: Bool { agregados.isEmpty && archivos.isEmpty }
+    var vacio: Bool { agregados.isEmpty && archivos.isEmpty && segundos.isEmpty }
 }
 
 /// Lee los transcripts de Claude Code y saca de ahí el consumo de tokens.
@@ -119,6 +122,13 @@ final class Escaner: @unchecked Sendable {
               let mensaje = raiz["message"] as? [String: Any],
               let uso = mensaje["usage"] as? [String: Any] else { return }
 
+        let marca = raiz["timestamp"] as? String
+
+        // El instante se anota ANTES del dedup: al reanudar o compactar, la
+        // misma respuesta se reescribe conservando su hora original, así que
+        // aunque no se vuelva a sumar sí sigue marcando actividad de la API.
+        if let s = Self.instante(marca) { lote.segundos.insert(s) }
+
         // Dedup: el mismo mensaje reaparece al reanudar o compactar una sesión.
         let idMensaje = mensaje["id"] as? String
         if let idMensaje {
@@ -135,7 +145,7 @@ final class Escaner: @unchecked Sendable {
                         mensajes: 1)
         if tk.total == 0 { return }
 
-        let llave = LlaveUso(dia: dia(de: raiz["timestamp"] as? String),
+        let llave = LlaveUso(dia: dia(de: marca),
                              cwd: (raiz["cwd"] as? String) ?? "(sin carpeta)",
                              modelo: (mensaje["model"] as? String) ?? "desconocido")
         lote.agregados[llave, default: Tokens()] += tk
@@ -143,6 +153,42 @@ final class Escaner: @unchecked Sendable {
     }
 
     // MARK: - Fechas
+
+    /// Epoch en segundos de un timestamp del transcript
+    /// ("2026-09-09T12:32:15.409Z", siempre UTC y siempre con ese ancho).
+    ///
+    /// Se parsea a mano: `ISO8601DateFormatter` cuesta microsegundos por línea
+    /// y acá se recorren decenas de miles en cada relectura completa.
+    static func instante(_ iso: String?) -> Int? {
+        guard let iso else { return nil }
+        let b = Array(iso.utf8)
+        guard b.count >= 19 else { return nil }
+        func num(_ i: Int, _ n: Int) -> Int? {
+            var v = 0
+            for k in i..<(i + n) {
+                let c = b[k]
+                guard c >= 48, c <= 57 else { return nil }
+                v = v * 10 + Int(c - 48)
+            }
+            return v
+        }
+        guard let a = num(0, 4), let m = num(5, 2), let d = num(8, 2),
+              let h = num(11, 2), let mi = num(14, 2), let sg = num(17, 2),
+              m >= 1, m <= 12, d >= 1, d <= 31, h < 24, mi < 60, sg <= 60 else { return nil }
+        return diasDesdeEpoch(a, m, d) * 86_400 + h * 3600 + mi * 60 + sg
+    }
+
+    /// Días entre 1970-01-01 y la fecha dada, en el calendario gregoriano
+    /// proléptico (algoritmo `days_from_civil` de Howard Hinnant). Evita armar
+    /// un `DateComponents` por línea.
+    private static func diasDesdeEpoch(_ anio: Int, _ mes: Int, _ dia: Int) -> Int {
+        let y = anio - (mes <= 2 ? 1 : 0)
+        let era = (y >= 0 ? y : y - 399) / 400
+        let yoe = y - era * 400                                        // [0, 399]
+        let doy = (153 * (mes + (mes > 2 ? -3 : 9)) + 2) / 5 + dia - 1 // [0, 365]
+        let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy                // [0, 146096]
+        return era * 146_097 + doe - 719_468
+    }
 
     private static let calendarioUTC: Calendar = {
         var c = Calendar(identifier: .gregorian)

@@ -82,10 +82,10 @@ struct VistaAjustes: View {
             HStack(spacing: 5) {
                 Text(titulo).font(fuente(11))
                 if let v {
-                    Text(Formato.porcentaje(v.porcentaje))
+                    Text(v.porcentaje.map { Formato.porcentaje($0) } ?? "—")
                         .font(fuente(10, .medium, mono: true))
-                        .foregroundStyle(Paleta.semaforo(v.porcentaje))
-                    Text("· libera \(Formato.restante(v.reinicia))")
+                        .foregroundStyle(v.porcentaje.map { Paleta.semaforo($0) } ?? .secondary)
+                    Text("· libera \(Formato.restante(v.reinicia, estimado: v.estimada))")
                         .font(fuente(9)).foregroundStyle(.tertiary)
                 } else {
                     Text("sin datos").font(fuente(9)).foregroundStyle(.tertiary)

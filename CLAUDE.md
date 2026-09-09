@@ -44,6 +44,13 @@ modelo frontera (`scope.model.display_name`, hoy "Fable").
 El plan sale de `oauthAccount.organizationRateLimitTier`
 (`default_claude_max_20x` → "Max 20×").
 
+**Ese dato se cae solo**: Claude Code deja de reescribir `cachedUsageUtilization`
+por horas (se le vio 22,7 h seguidas mientras reescribía el resto del archivo
+cada pocos minutos). Cuando su `resets_at` de la sesión ya pasó, la ventana de
+5 h vigente se deduce de la tabla `actividad` —un instante por respuesta de la
+API, sacado del `timestamp` de los transcripts— encadenando bloques de 5 h desde
+el último corte que Claude sí confirmó. Ver `Bloques.swift`.
+
 ## Arquitectura
 
 ```
@@ -53,6 +60,7 @@ Coordinador.swift   ObservableObject: orquesta escaneo, rango y formateo
 Escaner.swift       Lee los .jsonl de forma incremental (por offset)
 Almacen.swift       SQLite: agregados, dedup, control de archivos, histórico
 Suscripcion.swift   Lee ~/.claude.json
+Bloques.swift       Deduce la ventana de 5 h vigente desde la actividad local
 Arbol.swift         Arma el árbol de carpetas desde las filas agregadas
 UI/                 VistaPrincipal, VistaArbol, VistaHistorico, VistaAjustes,
                     EtiquetaBarra, Componentes
@@ -121,6 +129,26 @@ swiftc -O ${=FUENTES} /tmp/p/main.swift -o /tmp/prevtb && /tmp/prevtb /tmp
 - **Los controles nativos (`Picker` segmentado, `Toggle`, `Slider`) salen como
   rectángulos amarillos** en esas previsualizaciones. Es un artefacto del
   renderizador, no un error del app.
+- **`cachedUsageUtilization` se queda congelado por horas.** No es que no haya
+  sesión: Claude Code reescribe `~/.claude.json` cada pocos minutos y aun así
+  deja esa clave intacta (22,7 h en el caso que lo destapó, con Claude Code
+  corriendo todo el rato). Y no hay otra fuente: no está en el resto de
+  `~/.claude/`, ni en las demás claves `cache*` del JSON, ni en los transcripts
+  —que no traen cabeceras de rate limit—. Por eso la ventana de 5 h se estima.
+- **La ventana de 5 h es de la cuenta, no de Claude Code.** Se comprobó con dos
+  cortes que reportó Claude (09-07 22:29:59 y 09-08 10:10:00 local): ninguno
+  tiene línea en los transcripts, o sea que claude.ai, la app de escritorio o el
+  móvil también la abren. La estimación de `Bloques` puede empezar más tarde que
+  la real —nunca antes—, así que el tiempo que muestra es un techo, y por eso va
+  con «~» en la interfaz.
+- **El porcentaje de una ventana vencida no se recicla.** `Ventana.porcentaje`
+  es opcional a propósito: cuando la ventana en curso empezó después de la
+  última lectura de Claude, se muestra «—» y no se pinta la barra de progreso.
+  Un 3 % de la ventana anterior con cara de dato fresco es peor que no saber.
+- **El instante de actividad se anota antes del dedup.** Una respuesta reescrita
+  por un `--resume` no debe volver a sumar tokens, pero sí ocurrió: conserva su
+  hora original y marca actividad real de la API. Si se anotara después del
+  dedup, una relectura completa no llenaría nada.
 - **App Nap congela la app.** Al ser `LSUIElement` (sin ventana), macOS la
   suspende y estira sus timers varios minutos: la barra se quedaba pegada hasta
   que el usuario la tocaba. Se sostiene con `ProcessInfo.beginActivity`

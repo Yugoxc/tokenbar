@@ -28,6 +28,7 @@ final class Almacen: @unchecked Sendable {
         ejecutar("PRAGMA synchronous=NORMAL;")
         ejecutar("PRAGMA temp_store=MEMORY;")
         crearEsquema()
+        migrar()
     }
 
     deinit { if let db { sqlite3_close_v2(db) } }
@@ -51,6 +52,12 @@ final class Almacen: @unchecked Sendable {
           pos INTEGER NOT NULL, mtime REAL NOT NULL
         ) WITHOUT ROWID;
 
+        -- Un instante por cada respuesta de la API. Es lo que permite deducir
+        -- dónde empieza y termina la ventana de 5 h cuando Claude deja de
+        -- refrescar la suya (ver Bloques). Con INTEGER PRIMARY KEY el segundo
+        -- ES el rowid: una fila por segundo con actividad, sin índice aparte.
+        CREATE TABLE IF NOT EXISTS actividad (segundo INTEGER PRIMARY KEY);
+
         CREATE TABLE IF NOT EXISTS suscripcion (
           ts INTEGER PRIMARY KEY, plan TEXT,
           sesion_pct REAL, sesion_reset TEXT,
@@ -62,6 +69,27 @@ final class Almacen: @unchecked Sendable {
 
     private func ejecutar(_ sql: String) {
         sqlite3_exec(db, sql, nil, nil, nil)
+    }
+
+    /// Migraciones de esquema, numeradas en `PRAGMA user_version`.
+    ///
+    /// v1 — nace `actividad`. Como el escáner solo mira la cola nueva de cada
+    /// archivo, una base ya existente nunca la llenaría hacia atrás: se olvida
+    /// hasta dónde se leyó cada archivo para forzar UNA relectura completa. No
+    /// duplica nada, porque el conteo de tokens lo protege la tabla `vistos`.
+    private func migrar() {
+        var st: OpaquePointer?
+        var version: Int32 = 0
+        if sqlite3_prepare_v2(db, "PRAGMA user_version;", -1, &st, nil) == SQLITE_OK,
+           sqlite3_step(st) == SQLITE_ROW {
+            version = sqlite3_column_int(st, 0)
+        }
+        sqlite3_finalize(st)
+
+        if version < 1 {
+            ejecutar("DELETE FROM archivos;")
+            ejecutar("PRAGMA user_version=1;")
+        }
     }
 
     // MARK: - Escaneo
@@ -111,6 +139,14 @@ final class Almacen: @unchecked Sendable {
                 sqlite3_step(stUso); sqlite3_reset(stUso)
             }
             sqlite3_finalize(stUso)
+
+            var stAct: OpaquePointer?
+            sqlite3_prepare_v2(db, "INSERT OR IGNORE INTO actividad(segundo) VALUES(?);", -1, &stAct, nil)
+            for s in lote.segundos {
+                sqlite3_bind_int64(stAct, 1, Int64(s))
+                sqlite3_step(stAct); sqlite3_reset(stAct)
+            }
+            sqlite3_finalize(stAct)
 
             var stArch: OpaquePointer?
             sqlite3_prepare_v2(db, "INSERT OR REPLACE INTO archivos(ruta,tam,pos,mtime) VALUES(?,?,?,?);", -1, &stArch, nil)
@@ -162,6 +198,21 @@ final class Almacen: @unchecked Sendable {
                                cwd: String(cString: sqlite3_column_text(st, 1)),
                                modelo: String(cString: sqlite3_column_text(st, 2)),
                                tokens: tk))
+        }
+        return out
+    }
+
+    /// Instantes con actividad desde `desde` (epoch en segundos), en orden.
+    /// Se acota a propósito: para ubicar la ventana en curso no hace falta
+    /// arrastrar meses de historia.
+    func actividad(desde: Int) -> [Int] {
+        var out: [Int] = []
+        var st: OpaquePointer?
+        defer { sqlite3_finalize(st) }
+        guard sqlite3_prepare_v2(db, "SELECT segundo FROM actividad WHERE segundo>=? ORDER BY segundo;", -1, &st, nil) == SQLITE_OK else { return out }
+        sqlite3_bind_int64(st, 1, Int64(desde))
+        while sqlite3_step(st) == SQLITE_ROW {
+            out.append(Int(sqlite3_column_int64(st, 0)))
         }
         return out
     }

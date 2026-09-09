@@ -11,6 +11,69 @@ Entrada nueva SIEMPRE al inicio. Plantilla:
 **Pendiente**: <lo que quedó fuera, o "nada">
 ```
 
+## 2026-09-09 — el contador de sesión se quedó pegado: Claude dejó de refrescar su medidor
+
+**Qué**: el reloj de la ventana de 5 h ya no depende de que Claude Code
+refresque su dato. Cambios:
+
+1. **`Bloques.swift`** (nuevo): encadena ventanas de 5 h desde el último
+   `resets_at` que Claude sí confirmó, usando la actividad local, y devuelve la
+   que sigue abierta.
+2. **Tabla `actividad`** (`segundo INTEGER PRIMARY KEY`): un instante por cada
+   respuesta de la API, sacado del `timestamp` de las líneas con `message.usage`.
+   El instante se anota ANTES del dedup —una respuesta reescrita por un
+   `--resume` no vuelve a sumar tokens, pero sí marcó actividad de la API—.
+   Migración `user_version=1`: borra `archivos` para forzar UNA relectura
+   completa que llene la tabla hacia atrás. No duplica nada: se verificó que las
+   76.668 líneas con `usage` del corpus traen `message.id`, o sea que el dedup
+   por `vistos` las cubre a todas.
+3. **`Ventana.porcentaje` pasa a `Double?`** y aparece `Ventana.estimada`.
+   Cuando la ventana que trae Claude ya venció, `Coordinador.conSesionVigente`
+   la reemplaza por el bloque vigente con el porcentaje en desconocido: el
+   consumo de la ventana nueva no lo sabe nadie fuera de la API, y mostrar el de
+   la anterior era mentir con cara de dato fresco.
+4. **UI**: «—» donde no se sabe el porcentaje (y sin barra de progreso, que a
+   cero se leería como «no has gastado»), gris en vez de semáforo, «~» delante
+   del reloj estimado, y un cartel de aviso en el panel cuando el medidor de
+   Claude quedó atrás (`EstadoSuscripcion.rezagada`).
+5. **`Escaner.instante`**: parser de timestamps a mano (`days_from_civil`),
+   porque `ISO8601DateFormatter` se paga 78.000 veces en cada relectura completa.
+
+**Por qué**: la queja fue "el contador de uso de claude sigue pegado… mira las
+horas de la sesión". No era la barra ni los timers: era el dato.
+`~/.claude.json` → `cachedUsageUtilization.fetchedAtMs` llevaba **22,7 h**
+congelado (2026-09-08 10:50) aunque Claude Code reescribía el archivo cada pocos
+minutos. Su `five_hour.resets_at` (2026-09-08T18:10Z) había pasado hacía 18 h y
+`Formato.reloj` lo topa en `0:00`. Se descartó que hubiera otra fuente: ni el
+resto de `~/.claude/`, ni las demás claves `cache*` del JSON, ni los transcripts
+(no traen cabeceras de rate limit).
+
+**Cómo verificar**:
+```bash
+swift build -c release
+# el bloque estimado contra los datos de verdad:
+mkdir -p /tmp/p && cp <este main.swift de prueba> /tmp/p/
+```
+Al momento del arreglo: ancla 09-08 15:10 → bloque abierto 09-09 09:32:29 →
+14:32:29, y el parser coincidió con `ISO8601DateFormatter` en 4.000 timestamps
+reales.
+
+**Docs**: `CLAUDE.md` (arquitectura, fuentes de datos y gotchas),
+`~/Desktop/TYD/proyectos/tokenbar.md`.
+
+**Pendiente**:
+- El porcentaje de la ventana estimada queda en desconocido. Se podría aprender
+  la razón tokens↔% con los pares que ya guarda la tabla `suscripcion` cuando
+  Claude sí reporta, pero hoy hay 2 muestras: muy poco para ajustar nada.
+- La ventana de 5 h es de la **cuenta completa**: se comprobó que los inicios de
+  bloque que reportó Claude (09-07 22:29:59 y 09-08 10:10:00 local) no tienen
+  ninguna línea en los transcripts, o sea que claude.ai, la app de escritorio o
+  el móvil también la abren. La estimación puede empezar más tarde que la real
+  —nunca antes—, así que el tiempo que muestra es un techo.
+- La ventana semanal también queda desactualizada mientras Claude no refresque,
+  pero como sigue abierta se muestra tal cual; el cartel de aviso es lo que
+  advierte que se quedó corta.
+
 ## 2026-09-08 — la barra se quedaba pegada: App Nap, timers y render del label
 
 **Qué**: cuatro arreglos sobre la misma queja ("se buguea la barra y se queda

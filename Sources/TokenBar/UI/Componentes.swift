@@ -55,10 +55,17 @@ struct BarraLimite: View {
                     .foregroundStyle(.secondary)
                 Spacer(minLength: 4)
                 if let v = ventana {
-                    Text(Formato.porcentaje(v.porcentaje))
-                        .font(fuente(11, .semibold, mono: true))
-                        .foregroundStyle(Paleta.semaforo(v.porcentaje))
-                    Text(Formato.restante(v.reinicia))
+                    if let pct = v.porcentaje {
+                        Text(Formato.porcentaje(pct))
+                            .font(fuente(11, .semibold, mono: true))
+                            .foregroundStyle(Paleta.semaforo(pct))
+                    } else {
+                        Text("—")
+                            .font(fuente(11, .semibold, mono: true))
+                            .foregroundStyle(.tertiary)
+                            .help("Claude no ha reportado el consumo de esta ventana")
+                    }
+                    Text(Formato.restante(v.reinicia, estimado: v.estimada))
                         .font(fuente(10))
                         .foregroundStyle(.tertiary)
                 } else {
@@ -68,10 +75,12 @@ struct BarraLimite: View {
             GeometryReader { geo in
                 ZStack(alignment: .leading) {
                     Capsule().fill(Color.primary.opacity(0.08))
-                    if let v = ventana {
+                    // Sin porcentaje no se pinta nada: una barra a cero se
+                    // leería como «no has gastado», que es justo lo que no se sabe.
+                    if let pct = ventana?.porcentaje {
                         Capsule()
-                            .fill(Paleta.semaforo(v.porcentaje))
-                            .frame(width: max(2, geo.size.width * min(v.porcentaje, 100) / 100))
+                            .fill(Paleta.semaforo(pct))
+                            .frame(width: max(2, geo.size.width * min(pct, 100) / 100))
                     }
                 }
             }

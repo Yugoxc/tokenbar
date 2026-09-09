@@ -52,7 +52,7 @@ final class LectorSuscripcion: @unchecked Sendable {
                     for l in limites where (l["kind"] as? String) == "weekly_scoped" {
                         let modelo = ((l["scope"] as? [String: Any])?["model"] as? [String: Any])?["display_name"] as? String
                         estado.frontera = Ventana(
-                            porcentaje: (l["percent"] as? NSNumber)?.doubleValue ?? 0,
+                            porcentaje: (l["percent"] as? NSNumber)?.doubleValue,
                             reinicia: fecha(l["resets_at"] as? String),
                             etiqueta: modelo ?? "Modelo frontera")
                         break

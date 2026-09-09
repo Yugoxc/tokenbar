@@ -10,6 +10,7 @@ struct VistaPrincipal: View {
         VStack(alignment: .leading, spacing: 0) {
             cabecera
             Divider()
+            aviso
             limites
             Divider()
             totales
@@ -64,6 +65,31 @@ struct VistaPrincipal: View {
                 .help("Salir")
         }
         .padding(.horizontal, 10).padding(.vertical, 8)
+    }
+
+    /// Aviso de que el medidor de Claude quedó atrás.
+    ///
+    /// Claude Code solo reescribe `cachedUsageUtilization` mientras responde, y
+    /// a veces deja de hacerlo por horas: los porcentajes se quedan quietos y el
+    /// reloj de la ventana de 5 h se clava. Sin este cartel, la barra parece
+    /// simplemente rota. Solo aparece si hubo trabajo DESPUÉS de la última
+    /// lectura: si nadie usó Claude, el dato viejo sigue siendo correcto.
+    @ViewBuilder private var aviso: some View {
+        if co.suscripcion.rezagada {
+            HStack(alignment: .top, spacing: 6) {
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .font(fuente(9))
+                    .foregroundStyle(Paleta.aviso)
+                Text("Claude no refresca su medidor \(Formato.hace(co.suscripcion.leidoEn)): los porcentajes son de entonces y se quedaron cortos. El reloj de la sesión va estimado con tu actividad.")
+                    .font(fuente(9))
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, 10).padding(.vertical, 6)
+            .background(Paleta.aviso.opacity(0.12))
+            Divider()
+        }
     }
 
     private var limites: some View {

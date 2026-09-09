@@ -102,18 +102,24 @@ final class Coordinador: ObservableObject {
     /// Nunca más de dos: macOS da unos 22 pt de alto y una tercera línea sale
     /// recortada. Con tres ventanas activas, las dos últimas comparten línea.
     func lineasBarra(_ p: Preferencias) -> [LineaBarra] {
-        var partes: [(texto: String, pct: Double)] = []
+        var partes: [(texto: String, pct: Double?)] = []
 
         func agregar(_ etq: String, _ v: Ventana) {
-            var t = (p.mostrarEtiquetas ? etq + " " : "") + "\(Int(v.porcentaje.rounded()))%"
+            var t = p.mostrarEtiquetas ? etq + " " : ""
+            // Un guion cuando el porcentaje no se sabe: mostrar el de la
+            // ventana anterior sería mentir con cara de dato fresco.
+            t += v.porcentaje.map { "\(Int($0.rounded()))%" } ?? "—"
             // Cada ventana lleva su propio reloj: la de 5 h se libera en horas
             // y la semanal en días, y en ambas interesa saber cuánto falta.
-            if p.mostrarRestante, let r = v.reinicia { t += "  " + Formato.reloj(r) }
+            // El «~» avisa que el corte lo dedujimos nosotros, no Claude.
+            if p.mostrarRestante, let r = v.reinicia {
+                t += "  " + (v.estimada ? "~" : "") + Formato.reloj(r)
+            }
             partes.append((t, v.porcentaje))
         }
 
         if p.ningunaVentana {
-            if let peor = ventanas.max(by: { $0.0.porcentaje < $1.0.porcentaje }) {
+            if let peor = ventanas.max(by: { ($0.0.porcentaje ?? -1) < ($1.0.porcentaje ?? -1) }) {
                 agregar(peor.1, peor.0)
             }
         } else {
@@ -125,14 +131,18 @@ final class Coordinador: ObservableObject {
         }
         guard !partes.isEmpty else { return [LineaBarra(texto: "—", color: .secondary)] }
 
+        // Sin porcentaje no hay semáforo que valga: gris, que es el color de
+        // «no sé», y no un verde que se leería como «vas holgado».
+        func color(_ pct: Double?) -> Color { pct.map(Paleta.semaforo) ?? .secondary }
+
         if partes.count <= 2 {
-            return partes.map { LineaBarra(texto: $0.texto, color: Paleta.semaforo($0.pct)) }
+            return partes.map { LineaBarra(texto: $0.texto, color: color($0.pct)) }
         }
         let resto = partes.dropFirst()
         return [
-            LineaBarra(texto: partes[0].texto, color: Paleta.semaforo(partes[0].pct)),
+            LineaBarra(texto: partes[0].texto, color: color(partes[0].pct)),
             LineaBarra(texto: resto.map(\.texto).joined(separator: " · "),
-                       color: Paleta.semaforo(resto.map(\.pct).max() ?? 0))
+                       color: color(resto.compactMap(\.pct).max()))
         ]
     }
 
@@ -154,8 +164,10 @@ final class Coordinador: ObservableObject {
             escaner.escanear { hechos, total in
                 Task { @MainActor in self?.progreso = (hechos, total) }
             }
-            let estado = lector.leer()
-            if let estado { almacen.guardarSuscripcion(estado) }
+            let crudo = lector.leer()
+            // El histórico guarda lo que dijo Claude, nunca lo que estimamos.
+            if let crudo { almacen.guardarSuscripcion(crudo) }
+            let estado = crudo.map { Coordinador.conSesionVigente($0, almacen: almacen) }
             let todas = almacen.filas()
             let muestras = almacen.muestrasSuscripcion()
             await MainActor.run { [weak self] in
@@ -168,6 +180,37 @@ final class Coordinador: ObservableObject {
                 self.ultimoRefresco = Date()
             }
         }
+    }
+
+    /// Sustituye la ventana de 5 h por la vigente cuando la de Claude ya venció.
+    ///
+    /// Claude Code puede pasar horas sin reescribir `cachedUsageUtilization`
+    /// (se le vio más de un día). Cuando eso ocurre, su `resets_at` apunta a una
+    /// ventana cerrada y `Formato.reloj` lo topa en `0:00`: es el reloj «pegado»
+    /// que se ve en la barra. Acá se reemplaza por el bloque que sí está abierto
+    /// según la actividad local, con el porcentaje en desconocido —el consumo de
+    /// la ventana nueva no lo sabe nadie fuera de la API—.
+    nonisolated private static func conSesionVigente(_ e: EstadoSuscripcion, almacen: Almacen) -> EstadoSuscripcion {
+        var e = e
+        let ahora = Date()
+
+        // Se carga desde el ancla, o desde 8 días atrás si el ancla es reciente
+        // o no existe: alcanza de sobra para ubicar el bloque en curso.
+        let ancla = e.sesion?.reinicia
+        let piso = min(ancla?.timeIntervalSince1970 ?? .greatestFiniteMagnitude,
+                       ahora.timeIntervalSince1970 - 8 * 86_400)
+        let actividad = almacen.actividad(desde: Int(piso))
+        e.ultimaActividad = actividad.last.map { Date(timeIntervalSince1970: TimeInterval($0)) }
+
+        // Mientras el dato de Claude siga vivo, manda él: es el real.
+        if let r = ancla, r > ahora { return e }
+
+        let bloque = Bloques.abierto(actividad: actividad, ancla: ancla, ahora: ahora)
+        e.sesion = Ventana(porcentaje: nil,
+                           reinicia: bloque?.fin,
+                           etiqueta: e.sesion?.etiqueta ?? "Sesión (5 h)",
+                           estimada: true)
+        return e
     }
 
     private func recomponer() {
@@ -250,11 +293,12 @@ enum Formato {
             .replacingOccurrences(of: ".", with: ",") + "%"
     }
 
-    /// "en 2:45" — cuánto falta para que se libere una ventana.
-    static func restante(_ hasta: Date?) -> String {
+    /// "en 2:45" — cuánto falta para que se libere una ventana. Con
+    /// `estimado`, "en ~2:45": el corte lo dedujimos de la actividad local.
+    static func restante(_ hasta: Date?, estimado: Bool = false) -> String {
         guard let hasta else { return "—" }
         if hasta.timeIntervalSinceNow <= 0 { return "ya" }
-        return "en " + reloj(hasta)
+        return "en " + (estimado ? "~" : "") + reloj(hasta)
     }
 
     static func hace(_ fecha: Date?) -> String {
