@@ -3,7 +3,8 @@
 App de barra de menús de macOS (SwiftUI, `MenuBarExtra`) que muestra el consumo
 de tokens de Claude Code por carpeta, con histórico, y el estado de los límites
 del plan (sesión de 5 h, semanal, y semanal del modelo frontera). Reemplaza a
-ClaudeBar de TDDWorks. Corre local; no tiene backend ni red.
+ClaudeBar de TDDWorks. Corre local, sin backend; su única salida a la red es
+preguntarle el medidor del plan a `api.anthropic.com` cada 15 min.
 
 ## Regla de mantenimiento de docs (OBLIGATORIA — leer antes de cambiar código)
 
@@ -30,28 +31,42 @@ el doc y regístralo en la bitácora como entrada propia.
 
 ## De dónde salen los datos (lo esencial)
 
-Dos fuentes, ambas de solo lectura. **Este app nunca escribe en `~/.claude`.**
+Tres fuentes, todas de solo lectura. **Este app nunca escribe en `~/.claude`
+ni en el Llavero.**
 
 | Dato | Fuente | Detalle |
 |---|---|---|
 | Tokens por carpeta / día / modelo | `~/.claude/projects/**/*.jsonl` | Cada línea `assistant` trae `message.usage` y el `cwd` real de la sesión |
-| Sesión 5 h, semanal, modelo frontera, plan | `~/.claude.json` | Claves `cachedUsageUtilization` y `oauthAccount` |
+| Sesión 5 h, semanal, modelo frontera (**vivo**) | `GET https://api.anthropic.com/api/oauth/usage` | Cada 15 min, con el token OAuth de Claude Code leído del Llavero (`Medidor.swift`, `Llavero.swift`) |
+| Lo mismo, como respaldo · plan | `~/.claude.json` | Claves `cachedUsageUtilization` (lo que dejó el último `/usage`) y `oauthAccount` |
 
-`cachedUsageUtilization.utilization` trae `five_hour` y `seven_day` sueltos, y un
-arreglo `limits[]` donde el elemento de `kind == "weekly_scoped"` es el límite del
-modelo frontera (`scope.model.display_name`, hoy "Fable").
+El cuerpo del endpoint y `cachedUsageUtilization.utilization` son el **mismo
+objeto**: `five_hour` y `seven_day` sueltos, y un arreglo `limits[]` donde el
+elemento de `kind == "weekly_scoped"` es el límite del modelo frontera
+(`scope.model.display_name`, hoy "Fable"). Los dos pasan por
+`LectorSuscripcion.estado(utilization:)`. Entre ambas lecturas **gana la más
+nueva** (`Coordinador.combinar`): si el usuario acaba de abrir `/usage`, la de
+Claude Code es más fresca que la nuestra.
 
 El plan sale de `oauthAccount.organizationRateLimitTier`
-(`default_claude_max_20x` → "Max 20×").
+(`default_claude_max_20x` → "Max 20×"); el endpoint no lo trae.
 
-**Ese dato se cae solo**: Claude Code deja de reescribir `cachedUsageUtilization`
-por horas (se le vio 22,7 h seguidas mientras reescribía el resto del archivo
-cada pocos minutos). Cuando su `resets_at` de la sesión ya pasó, la ventana de
-5 h vigente se deduce de la tabla `actividad` —un instante por respuesta de la
-API, con lo que costó, sacado del `timestamp` de los transcripts— encadenando
-bloques de 5 h desde el último corte que Claude sí confirmó. Esa misma tabla da
-el consumo del bloque en curso, que es lo que se muestra donde iría el
-porcentaje. Ver `Bloques.swift`.
+**Por qué hay que preguntarle a la API**: Claude Code **solo** escribe
+`cachedUsageUtilization` cuando alguien abre `/usage` o un panel de editor
+(VS Code/JetBrains/Desktop) le pide el uso a la sesión; la CLI sola no lo
+refresca nunca. Se verificó en el binario (2.1.276): la única función que lo
+escribe corre después de llamar al endpoint, y al endpoint solo lo llaman esas
+dos rutas. Por eso en toda la vida del app había 3 lecturas, y ninguna más nueva
+que el último `/usage`. Lo de «Claude refresca cada 5 min» de las primeras
+versiones era ClaudeBar preguntando por su cuenta.
+
+**Cuando no hay lectura en línea** (sin red, sesión vencida, consulta apagada)
+manda el respaldo, y ahí el `resets_at` de la sesión puede estar vencido: la
+ventana de 5 h vigente se deduce entonces de la tabla `actividad` —un instante
+por respuesta de la API, con lo que costó, sacado del `timestamp` de los
+transcripts— encadenando bloques de 5 h desde el último corte confirmado. Esa
+misma tabla da el consumo del bloque en curso, que es lo que se muestra donde
+iría el porcentaje. Ver `Bloques.swift`.
 
 ## Arquitectura
 
@@ -61,7 +76,9 @@ Preferencias.swift  Qué mostrar en la barra y tamaños de letra (UserDefaults)
 Coordinador.swift   ObservableObject: orquesta escaneo, rango y formateo
 Escaner.swift       Lee los .jsonl de forma incremental (por offset)
 Almacen.swift       SQLite: agregados, dedup, control de archivos, histórico
-Suscripcion.swift   Lee ~/.claude.json
+Suscripcion.swift   Lee ~/.claude.json y parsea el objeto `utilization`
+Medidor.swift       Pregunta el medidor vivo a api.anthropic.com/api/oauth/usage
+Llavero.swift       Saca el token OAuth de Claude Code del Llavero (solo lectura)
 Bloques.swift       Deduce la ventana de 5 h vigente desde la actividad local
 Arbol.swift         Arma el árbol de carpetas desde las filas agregadas
 UI/                 VistaPrincipal, VistaArbol, VistaHistorico, VistaAjustes,
@@ -95,8 +112,14 @@ swiftc -O ${=FUENTES} /tmp/p/main.swift -o /tmp/prevtb && /tmp/prevtb /tmp
 
 - **Nunca escribir dentro de `~/.claude/` ni `~/.claude.json`.** Son de Claude Code;
   este app es un observador. Corromperlos rompe las sesiones del usuario.
-- **Nunca leer el llavero ni credenciales OAuth.** Todo lo que se necesita ya está
-  en `~/.claude.json`; no hay motivo para llamar a la API de Anthropic.
+- **El token OAuth de Claude Code se lee, no se toca.** Sale del ítem del Llavero
+  «Claude Code-credentials» (`claudeAiOauth.accessToken`), vive lo que dura la
+  petición, no se guarda en ninguna propiedad ni tabla y no se registra jamás.
+  **Nunca renovarlo desde acá**: rotar el refresh token deja a Claude Code con
+  uno inválido. Si venció, se espera a que Claude Code lo renueve. Y el único
+  host al que se habla es `api.anthropic.com`, con ese único endpoint. (Regla
+  cambiada el 2026-09-18 por decisión del dueño: antes era «nunca leer el
+  Llavero»; se revirtió porque sin la API el medidor se quedaba de días.)
 - No cargar un `.jsonl` completo en memoria: hay archivos de cientos de MB.
 
 ## Gotchas
@@ -107,9 +130,21 @@ swiftc -O ${=FUENTES} /tmp/p/main.swift -o /tmp/prevtb && /tmp/prevtb /tmp
 - **La caché domina el total**: `cache_read_input_tokens` es ~96 % de los tokens.
   Contarla es lo correcto (es lo que consume el plan), pero explica por qué los
   números están en miles de millones y no en millones.
-- **`~/.claude.json` solo se refresca con una sesión de Claude Code viva**, cada
-  ~5 min, y el dato caduca a la hora. Si no hay sesión, los porcentajes se quedan
-  quietos: por eso el pie del panel dice "Datos de Claude hace X".
+- **El pie del panel dice de dónde salió el medidor**: «Medidor del plan hace X»
+  cuando lo trajo el endpoint, «Medidor de Claude Code hace X» cuando manda el
+  respaldo de `~/.claude.json`. Si dice lo segundo y hace días, la consulta en
+  línea está fallando o apagada: el aviso amarillo trae el motivo.
+- **El Llavero se lee con `/usr/bin/security`, no con `SecItemCopyMatching`.**
+  El Llavero evalúa la lista de acceso contra el proceso que pide, y esa
+  herramienta ya está autorizada en el ítem (es con la que Claude Code lo
+  escribe). Con la API directa, la firma ad-hoc cambia en cada compilación y
+  macOS pediría permiso con cada reinstalación.
+- **`expiresAt` del token es del access token, y lo renueva Claude Code** al
+  responder. Si el usuario no usa Claude Code, el token vence y el medidor en
+  línea se queda sin lectura hasta la próxima respuesta: es el límite honesto,
+  y el panel lo dice («la sesión de Claude Code venció hace X»).
+- **`leerMedidor` tiene freno de 60 s** aunque venga forzado (botón ↻, toggle,
+  despertar): dos clics no son dos consultas.
 - **Un `.jsonl` puede encoger** si Claude lo reescribe. El escáner compara el
   tamaño guardado: si es menor que el anterior, relee el archivo desde cero (el
   dedup evita el doble conteo).
@@ -136,12 +171,14 @@ swiftc -O ${=FUENTES} /tmp/p/main.swift -o /tmp/prevtb && /tmp/prevtb /tmp
 - **Los controles nativos (`Picker` segmentado, `Toggle`, `Slider`) salen como
   rectángulos amarillos** en esas previsualizaciones. Es un artefacto del
   renderizador, no un error del app.
-- **`cachedUsageUtilization` se queda congelado por horas.** No es que no haya
-  sesión: Claude Code reescribe `~/.claude.json` cada pocos minutos y aun así
-  deja esa clave intacta (22,7 h en el caso que lo destapó, con Claude Code
-  corriendo todo el rato). Y no hay otra fuente: no está en el resto de
-  `~/.claude/`, ni en las demás claves `cache*` del JSON, ni en los transcripts
-  —que no traen cabeceras de rate limit—. Por eso la ventana de 5 h se estima.
+- **`cachedUsageUtilization` no se «congela»: solo lo escribe `/usage`.** Se
+  creyó por días que Claude Code lo refrescaba cada 5 min y a ratos se
+  «caía» (22,7 h, después 8 días). En el binario está claro: la función que lo
+  escribe corre solo tras llamar al endpoint de uso, y eso pasa al abrir
+  `/usage` o cuando un panel de editor pide `getUsage`. No hay otra fuente en
+  disco: ni en el resto de `~/.claude/`, ni en las demás claves `cache*`, ni
+  en los transcripts —que no traen cabeceras de rate limit—. Por eso el app
+  pregunta a la API, y la estimación de la ventana de 5 h quedó de respaldo.
 - **La ventana de 5 h es de la cuenta, no de Claude Code.** Se comprobó con dos
   cortes que reportó Claude (09-07 22:29:59 y 09-08 10:10:00 local): ninguno
   tiene línea en los transcripts, o sea que claude.ai, la app de escritorio o el

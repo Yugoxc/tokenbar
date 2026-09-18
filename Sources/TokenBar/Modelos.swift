@@ -65,26 +65,49 @@ struct Ventana: Equatable {
     var consumo: Int?
 }
 
-/// Foto del estado de la suscripción leída de ~/.claude.json.
+/// De dónde salió la última lectura del medidor.
+enum FuenteMedidor: Equatable {
+    /// Este app le preguntó al endpoint de uso (ver `Medidor`).
+    case endpoint
+    /// Lo que Claude Code dejó en `~/.claude.json` la última vez que alguien
+    /// abrió `/usage`.
+    case archivo
+
+    var nombre: String {
+        switch self {
+        case .endpoint: return "Medidor del plan"
+        case .archivo: return "Medidor de Claude Code"
+        }
+    }
+}
+
+/// Foto del estado de la suscripción: las tres ventanas del plan y de dónde
+/// y cuándo salieron.
 struct EstadoSuscripcion: Equatable {
     var plan: String = "—"
     var sesion: Ventana?
     var semanal: Ventana?
     var frontera: Ventana?          // límite por modelo (weekly_scoped)
-    var leidoEn: Date?              // cuándo Claude Code refrescó el dato
+    var leidoEn: Date?              // cuándo se leyó el medidor (endpoint o /usage)
+    var fuente: FuenteMedidor = .archivo
     var ultimaActividad: Date?      // última respuesta de la API en los transcripts
+    /// Por qué la última consulta al endpoint no dio lectura (`nil` si dio, o
+    /// si la consulta en línea está apagada). Se muestra solo cuando importa:
+    /// con una lectura fresca en mano, un tropiezo puntual no es noticia.
+    var problemaMedidor: String?
 
     var vacio: Bool { sesion == nil && semanal == nil && frontera == nil }
 
-    /// Claude solo reescribe su medidor mientras responde. Si se siguió
-    /// trabajando bastante después de su última lectura, los porcentajes
-    /// describen un consumo viejo y se quedaron cortos: hay que avisarlo.
+    /// Si se siguió trabajando bastante después de la última lectura, los
+    /// porcentajes describen un consumo viejo y se quedaron cortos: hay que
+    /// avisarlo. El margen es el doble de la cadencia del medidor en línea
+    /// (15 min): actividad dentro de ese lapso es lo normal, no un rezago.
     ///
     /// No basta con "el dato está añejo": si simplemente no se usó Claude, el
     /// dato viejo sigue siendo correcto y un aviso sería ruido.
     var rezagada: Bool {
         guard let leidoEn, let ultimaActividad else { return false }
-        return ultimaActividad.timeIntervalSince(leidoEn) > 15 * 60
+        return ultimaActividad.timeIntervalSince(leidoEn) > 30 * 60
     }
 }
 

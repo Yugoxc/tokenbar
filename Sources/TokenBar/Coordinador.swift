@@ -46,10 +46,22 @@ final class Coordinador: ObservableObject {
     private var almacen: Almacen?
     private var escaner: Escaner?
     private let lector = LectorSuscripcion()
+    private let medidor = LectorMedidor()
     private var filas: [FilaUso] = []
     private var timer: Timer?
     private var latido: Timer?
+    private var timerMedidor: Timer?
     private var inicioEscaneo: Date?
+
+    /// Cada cuánto se le pregunta al endpoint por el medidor del plan. Lo fijó
+    /// el dueño: 15 min alcanza para que la barra no mienta, sin golpear la
+    /// API por gusto.
+    static let cadenciaMedidor: TimeInterval = 15 * 60
+    /// Última lectura que dio el endpoint, tal cual (sin la ventana estimada).
+    private var lecturaEnLinea: EstadoSuscripcion?
+    private var problemaMedidor: String?
+    private var ultimoIntentoMedidor: Date?
+    private var leyendoMedidor = false
     /// Token de `beginActivity`: mientras viva, macOS no duerme el proceso.
     private var actividad: NSObjectProtocol?
 
@@ -70,10 +82,15 @@ final class Coordinador: ObservableObject {
             reason: "Mantener al día el uso en la barra de menús")
 
         refrescar()
+        Task { await leerMedidor() }
 
-        // Claude reescribe ~/.claude.json cada ~5 min y los transcripts en cada
-        // respuesta; 30 s mantiene la barra al día sin costo perceptible.
+        // Los transcripts cambian con cada respuesta y ~/.claude.json cuando
+        // alguien abre /usage; 30 s mantiene la barra al día sin costo
+        // perceptible. El medidor en línea va aparte, a su propia cadencia.
         timer = programar(cada: 30) { [weak self] in self?.refrescar() }
+        timerMedidor = programar(cada: Self.cadenciaMedidor) { [weak self] in
+            Task { await self?.leerMedidor() }
+        }
 
         // Latido aparte del escaneo: aunque un refresco se demore o falle, el
         // reloj de la barra sigue avanzando.
@@ -82,9 +99,57 @@ final class Coordinador: ObservableObject {
         // Al despertar, los timers pueden venir atrasados: se fuerza una pasada.
         NSWorkspace.shared.notificationCenter.addObserver(
             forName: NSWorkspace.didWakeNotification, object: nil, queue: .main) { [weak self] _ in
-            Task { @MainActor in self?.refrescar() }
+            Task { @MainActor in
+                self?.refrescar()
+                await self?.leerMedidor()
+            }
         }
     }
+
+    /// Le pregunta al endpoint por el medidor del plan y, si contesta, deja la
+    /// lectura para que el próximo `refrescar()` la combine con lo demás.
+    ///
+    /// `forzado` salta la cadencia (botón ↻, toggle recién encendido, despertar)
+    /// pero no el freno de 60 s: dos clics seguidos no son dos consultas. Los
+    /// tropiezos no borran la última lectura buena —sigue siendo la más fresca
+    /// que hay— y quedan en `problemaMedidor` para que el panel lo diga cuando
+    /// importe.
+    func leerMedidor(forzado: Bool = false) async {
+        guard Preferencias.compartidas.medidorEnLinea else {
+            // Apagado: se suelta la lectura y el panel vuelve al respaldo al tiro.
+            lecturaEnLinea = nil
+            problemaMedidor = nil
+            refrescar()
+            return
+        }
+        if leyendoMedidor { return }
+        if let u = ultimoIntentoMedidor {
+            let hace = Date().timeIntervalSince(u)
+            if hace < 60 { return }
+            if !forzado, hace < Self.cadenciaMedidor - 30 { return }
+        }
+        leyendoMedidor = true
+        ultimoIntentoMedidor = Date()
+        defer { leyendoMedidor = false }
+
+        do {
+            // El Llavero se lee con un proceso aparte: fuera del hilo principal.
+            let cred = try await Task.detached(priority: .utility) { try Llavero.credencialClaude() }.value
+            if let vence = cred.vence, vence < Date() {
+                problemaMedidor = "la sesión de Claude Code venció \(Formato.hace(vence)); se renueva sola con tu próxima respuesta de Claude Code"
+            } else {
+                lecturaEnLinea = try await medidor.leer(token: cred.token, version: Self.version)
+                problemaMedidor = nil
+            }
+        } catch {
+            problemaMedidor = String(describing: error)
+        }
+        refrescar()
+    }
+
+    /// Versión del bundle, para el User-Agent. Sin bundle (previsualización) va "dev".
+    private static let version: String =
+        Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "dev"
 
     /// Timer en modo `.common`: en el modo por omisión se detiene mientras hay
     /// un menú abierto o el usuario arrastra algo, y la barra se congela.
@@ -160,20 +225,23 @@ final class Coordinador: ObservableObject {
             .compactMap { v, n in v.map { ($0, n) } }
     }
 
-    func refrescar() {
+    /// `manual`: el usuario tocó ↻, así que también se le pregunta al endpoint.
+    func refrescar(manual: Bool = false) {
         guard let escaner, let almacen else { return }
+        if manual { Task { await leerMedidor(forzado: true) } }
         // Si un escaneo quedó colgado, pasado un rato se intenta igual: antes
         // un solo escaneo trabado dejaba la barra muerta hasta reiniciar.
         if escaneando, let i = inicioEscaneo, Date().timeIntervalSince(i) < 180 { return }
         escaneando = true
         inicioEscaneo = Date()
         let lector = self.lector
+        let enLinea = lecturaEnLinea, problema = problemaMedidor
         Task.detached(priority: .utility) { [weak self] in
             escaner.escanear { hechos, total in
                 Task { @MainActor in self?.progreso = (hechos, total) }
             }
-            let crudo = lector.leer()
-            // El histórico guarda lo que dijo Claude, nunca lo que estimamos.
+            let crudo = Coordinador.combinar(archivo: lector.leer(), enLinea: enLinea, problema: problema)
+            // El histórico guarda lo que dijo la API, nunca lo que estimamos.
             if let crudo { almacen.guardarSuscripcion(crudo) }
             let estado = crudo.map { Coordinador.conSesionVigente($0, almacen: almacen) }
             let todas = almacen.filas()
@@ -190,14 +258,34 @@ final class Coordinador: ObservableObject {
         }
     }
 
+    /// Elige entre lo que dejó Claude Code en `~/.claude.json` y lo que trajo el
+    /// endpoint: **gana la lectura más nueva**. Normalmente es la del endpoint,
+    /// pero si el usuario acaba de abrir `/usage`, Claude Code tiene una más
+    /// fresca y no hay por qué ignorarla. El plan viene solo del archivo
+    /// (`oauthAccount`); el endpoint no lo trae.
+    nonisolated static func combinar(archivo: EstadoSuscripcion?, enLinea: EstadoSuscripcion?, problema: String?) -> EstadoSuscripcion? {
+        var elegido: EstadoSuscripcion?
+        let archivoMasNuevo = (archivo?.leidoEn ?? .distantPast) > (enLinea?.leidoEn ?? .distantPast)
+        if let enLinea, !archivoMasNuevo {
+            elegido = enLinea
+            elegido?.plan = archivo?.plan ?? enLinea.plan
+        } else {
+            elegido = archivo
+        }
+        elegido?.problemaMedidor = problema
+        return elegido
+    }
+
     /// Sustituye la ventana de 5 h por la vigente cuando la de Claude ya venció.
     ///
-    /// Claude Code puede pasar horas sin reescribir `cachedUsageUtilization`
-    /// (se le vio más de un día). Cuando eso ocurre, su `resets_at` apunta a una
-    /// ventana cerrada y `Formato.reloj` lo topa en `0:00`: es el reloj «pegado»
-    /// que se ve en la barra. Acá se reemplaza por el bloque que sí está abierto
-    /// según la actividad local, con el porcentaje en desconocido —el consumo de
-    /// la ventana nueva no lo sabe nadie fuera de la API—.
+    /// Con el medidor en línea esto casi no actúa: la lectura llega cada 15 min
+    /// y su `resets_at` sigue vivo. Es el respaldo para cuando no hay lectura
+    /// (sin red, sesión vencida, consulta apagada): ahí manda lo que dejó
+    /// Claude Code —que solo escribe al abrir `/usage`— y su `resets_at` puede
+    /// apuntar a una ventana cerrada, con lo que `Formato.reloj` se clava en
+    /// `0:00`. Acá se reemplaza por el bloque que sí está abierto según la
+    /// actividad local, con el porcentaje en desconocido —el consumo de la
+    /// ventana nueva no lo sabe nadie fuera de la API—.
     nonisolated private static func conSesionVigente(_ e: EstadoSuscripcion, almacen: Almacen) -> EstadoSuscripcion {
         var e = e
         let ahora = Date()

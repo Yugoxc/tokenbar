@@ -12,6 +12,11 @@ final class Preferencias: ObservableObject {
     @Published var mostrarEtiquetas: Bool { didSet { d.set(mostrarEtiquetas, forKey: "mostrarEtiquetas") } }
     @Published var mostrarIcono: Bool { didSet { d.set(mostrarIcono, forKey: "mostrarIcono") } }
 
+    /// Consultar el medidor del plan en línea (ver `Medidor`). Apagado, el app
+    /// vuelve a ser un observador sin red: se queda con lo que Claude Code
+    /// dejó en `~/.claude.json` y estima la ventana de 5 h por actividad.
+    @Published var medidorEnLinea: Bool { didSet { d.set(medidorEnLinea, forKey: "medidorEnLinea") } }
+
     /// Multiplican los tamaños de letra. El panel y la barra se ajustan por
     /// separado: en la barra manda la altura fija que da macOS.
     @Published var escalaPanel: Double { didSet { d.set(escalaPanel, forKey: "escalaPanel") } }
@@ -25,6 +30,7 @@ final class Preferencias: ObservableObject {
         d.register(defaults: [
             "mostrarSesion": true, "mostrarSemanal": true, "mostrarFrontera": false,
             "mostrarRestante": true, "mostrarEtiquetas": false, "mostrarIcono": true,
+            "medidorEnLinea": true,
             "escalaPanel": 1.25, "escalaBarra": 1.15
         ])
         // La barra se pidió sin los prefijos «5h»/«7d»: se apagan una sola vez
@@ -39,6 +45,7 @@ final class Preferencias: ObservableObject {
         mostrarRestante = d.bool(forKey: "mostrarRestante")
         mostrarEtiquetas = d.bool(forKey: "mostrarEtiquetas")
         mostrarIcono = d.bool(forKey: "mostrarIcono")
+        medidorEnLinea = d.bool(forKey: "medidorEnLinea")
         escalaPanel = d.double(forKey: "escalaPanel")
         escalaBarra = d.double(forKey: "escalaBarra")
     }

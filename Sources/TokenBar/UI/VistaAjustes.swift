@@ -35,6 +35,22 @@ struct VistaAjustes: View {
 
             Divider()
 
+            Toggle(isOn: $prefs.medidorEnLinea) {
+                VStack(alignment: .leading, spacing: 1) {
+                    Text("Medidor del plan en línea").font(fuente(11))
+                    Text("Cada 15 min, con tu sesión de Claude Code del Llavero. Solo habla con api.anthropic.com. Apagado, se queda con lo que Claude Code dejó al abrir /usage.")
+                        .font(fuente(9)).foregroundStyle(.tertiary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            // Recién encendido se consulta al tiro: esperar 15 min para ver el
+            // efecto de un interruptor parecería que no funcionó.
+            .onChange(of: prefs.medidorEnLinea) { _, _ in
+                Task { await co.leerMedidor(forzado: true) }
+            }
+
+            Divider()
+
             VStack(alignment: .leading, spacing: 6) {
                 deslizador("Tamaño de letra", $prefs.escalaPanel, 0.85...1.9)
                 deslizador("Tamaño en la barra", $prefs.escalaBarra, 0.85...1.6)

@@ -51,7 +51,7 @@ struct VistaPrincipal: View {
                         .foregroundStyle(.tertiary)
                 }
             }
-            Button { co.refrescar() } label: { Image(systemName: "arrow.clockwise").font(fuente(10)) }
+            Button { co.refrescar(manual: true) } label: { Image(systemName: "arrow.clockwise").font(fuente(10)) }
                 .buttonStyle(.plain).foregroundStyle(.secondary)
                 .help("Refrescar ahora")
             Button { ajustesAbiertos.toggle() } label: { Image(systemName: "gearshape").font(fuente(10)) }
@@ -67,12 +67,15 @@ struct VistaPrincipal: View {
         .padding(.horizontal, 10).padding(.vertical, 8)
     }
 
-    /// Aviso de que el medidor de Claude quedó atrás.
+    /// Aviso de que el medidor quedó atrás.
     ///
-    /// Claude Code solo reescribe `cachedUsageUtilization` mientras responde, y
-    /// a veces deja de hacerlo por horas: los porcentajes se quedan quietos y el
-    /// reloj de la ventana de 5 h se clava. Sin este cartel, la barra parece
-    /// simplemente rota.
+    /// Con el medidor en línea la lectura llega cada 15 min; si aun así quedó
+    /// vieja es porque la consulta falló (sin red, sesión vencida) o está
+    /// apagada, y entonces manda lo que Claude Code dejó al abrir `/usage` —que
+    /// puede ser de días—. Los porcentajes se quedan quietos y el reloj de la
+    /// ventana de 5 h se clava; sin este cartel, la barra parece simplemente
+    /// rota. El motivo, cuando se sabe, va en la misma frase: «hace 8 d» sin
+    /// decir por qué no le sirve a nadie.
     ///
     /// Son dos cosas distintas y no siempre pasan juntas, así que cada frase se
     /// arma sola: los porcentajes se quedan cortos si hubo trabajo DESPUÉS de la
@@ -85,7 +88,14 @@ struct VistaPrincipal: View {
         let estimado = co.suscripcion.sesion?.estimada == true
         var frases: [String] = []
         if viejos {
-            frases.append("Claude no refresca su medidor \(Formato.hace(co.suscripcion.leidoEn)): los porcentajes son de entonces y se quedaron cortos.")
+            let hace = Formato.hace(co.suscripcion.leidoEn)
+            if let motivo = co.suscripcion.problemaMedidor {
+                frases.append("No se pudo leer el medidor del plan (\(motivo)). La última lectura es de \(hace): los porcentajes son de entonces y se quedaron cortos.")
+            } else if prefs.medidorEnLinea {
+                frases.append("El medidor del plan lleva \(hace) sin lectura: los porcentajes son de entonces y se quedaron cortos.")
+            } else {
+                frases.append("Sin el medidor en línea, Claude Code solo actualiza el suyo al abrir /usage; la última lectura es de \(hace) y los porcentajes se quedaron cortos.")
+            }
         }
         if estimado {
             frases.append(viejos
@@ -169,7 +179,7 @@ struct VistaPrincipal: View {
                 Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(Paleta.critico)
                 Text(e).lineLimit(1)
             } else {
-                Text("Datos de Claude \(Formato.hace(co.suscripcion.leidoEn))")
+                Text("\(co.suscripcion.fuente.nombre) \(Formato.hace(co.suscripcion.leidoEn))")
             }
             Spacer()
             Text("Revisado \(Formato.hace(co.ultimoRefresco))")

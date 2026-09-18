@@ -11,6 +11,65 @@ Entrada nueva SIEMPRE al inicio. Plantilla:
 **Pendiente**: <lo que quedó fuera, o "nada">
 ```
 
+## 2026-09-18 — v1.11.0: el medidor del plan se lee de la API cada 15 min; el «congelado» era que nadie lo pedía
+
+**Qué**: TokenBar le pregunta el medidor del plan directo a
+`GET https://api.anthropic.com/api/oauth/usage` —al arrancar, cada 15 min, al
+despertar y con el botón ↻— usando el token OAuth de Claude Code que está en el
+Llavero (`Llavero.swift`, `Medidor.swift`). El cuerpo es el mismo objeto que
+Claude Code deja en `cachedUsageUtilization`, así que pasa por el mismo parser
+(`LectorSuscripcion.estado(utilization:)`, ahora estático). Entre esa lectura y
+la de `~/.claude.json` gana la más nueva (`Coordinador.combinar`), y el plan
+sigue saliendo del archivo. Los bloques estimados de 5 h quedan como respaldo
+para cuando no hay lectura. Nuevo interruptor «Medidor del plan en línea»
+(`medidorEnLinea`, encendido por defecto); el pie dice de dónde salió el dato
+(«Medidor del plan» / «Medidor de Claude Code») y el aviso amarillo trae el
+motivo cuando la consulta falla (sin red, 401, sesión vencida, sin ítem en el
+Llavero). `rezagada` pasa de 15 a 30 min: el doble de la cadencia.
+
+**Por qué**: el panel llevaba **8 días** diciendo «Claude no refresca su
+medidor». Se creía que Claude Code reescribía `cachedUsageUtilization` cada
+5 min y «se caía» a ratos. Al mirar el binario (2.1.276) quedó claro que **solo
+lo escribe al abrir `/usage`** o cuando un panel de editor le pide `getUsage`;
+la CLI sola no lo toca nunca. Lo confirma la tabla `suscripcion`: en toda la
+vida del app había **3 lecturas** (08-09 00:36, 08-09 10:50, 09-09 10:31), las
+tres veces que se abrió `/usage`. Lo de «cada 5 min» era ClaudeBar preguntando
+por su cuenta; al desinstalarlo se fue la fuente. El dueño decidió revertir la
+regla «nunca leer el Llavero» (ver CLAUDE.md, reglas duras) y fijó la cadencia
+en 15 min. Al instalarse, la barra pasó de 55 %/56 %/74 % (del 09-09) a los
+reales 2 %/65 %/14 %.
+
+De paso salió un defecto que la segunda fuente destapó: `guardarSuscripcion`
+fechaba cada fila con `Date()`, así que al arrancar el primer refresco guardaba
+la lectura vieja de `~/.claude.json` (55 %, del 09-09) **con fecha de hoy**,
+un punto falso en el histórico justo antes del dato real. Ahora la fila lleva
+la hora de la lectura (`leidoEn`) y no se guarda nada que no sea más nuevo que
+lo último guardado. Se borraron a mano las cinco filas falsas del 18-09.
+
+Dos decisiones que no son obvias: el Llavero se lee con `/usr/bin/security`
+(ya autorizado en el ítem; con `SecItemCopyMatching` la firma ad-hoc pediría
+permiso en cada reinstalación) y el token **jamás se renueva desde acá**: rotar
+el refresh token dejaría a Claude Code con uno inválido. Si vence, se espera a
+que Claude Code lo renueve y el panel lo dice.
+
+**Cómo verificar**: `swift build -c release`; instalar y mirar
+`sqlite3 ~/Library/Application\ Support/TokenBar/tokenbar.sqlite "SELECT
+datetime(ts,'unixepoch','localtime'), sesion_pct, semanal_pct, frontera_pct FROM
+suscripcion ORDER BY ts DESC LIMIT 3"`: tiene que haber una fila de hace
+segundos. El pie del panel debe decir «Medidor del plan hace N s». Con el
+interruptor apagado el pie vuelve a «Medidor de Claude Code hace …».
+Verificado con un arnés aparte contra las fuentes reales: token de 108
+caracteres, HTTP 200, `combinar` elige el endpoint (y el archivo cuando es más
+nuevo), un token inválido da «la API rechazó la sesión de Claude Code (401)».
+
+**Docs**: `CLAUDE.md` (fuentes de datos, regla dura del Llavero, arquitectura,
+gotchas); `AGENTS.md` (la regla resumida); ficha y bitácora en TYD.
+
+**Pendiente**: el token vence cada pocas horas y solo lo renueva Claude Code; si
+no se usa Claude Code en todo el día, el medidor en línea se queda sin lectura
+y manda el respaldo (avisado en el panel). Se podría medir cuánto pasa en la
+práctica antes de decidir si vale hacer algo.
+
 ## 2026-09-09 — el propio arreglo contaba doble: la migración ahora la manda la versión del esquema
 
 **Qué**: `reconstruirActividad()` pasa a correr **después** del escaneo, y la

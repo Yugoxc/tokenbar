@@ -291,20 +291,29 @@ final class Almacen: @unchecked Sendable {
 
     /// Guarda una muestra solo si cambió algo respecto de la última: el archivo
     /// de Claude se reescribe cada 5 min aunque los porcentajes sigan iguales.
+    /// Guarda una lectura del medidor si es más nueva que la última guardada y
+    /// cambió algo. La fila lleva **la hora de la lectura**, no la de ahora: al
+    /// arrancar, el primer refresco trae lo que dejó Claude Code en
+    /// `~/.claude.json` —de días atrás— y guardarlo con fecha de hoy inventaba
+    /// un punto falso en el histórico justo antes de que llegara el dato real.
     func guardarSuscripcion(_ e: EstadoSuscripcion) {
         cola.sync {
             let iso = ISO8601DateFormatter()
+            let ts = Int64((e.leidoEn ?? Date()).timeIntervalSince1970)
             var st: OpaquePointer?
-            sqlite3_prepare_v2(db, "SELECT sesion_pct, semanal_pct, frontera_pct FROM suscripcion ORDER BY ts DESC LIMIT 1;", -1, &st, nil)
-            var igual = false
+            sqlite3_prepare_v2(db, "SELECT ts, sesion_pct, semanal_pct, frontera_pct FROM suscripcion ORDER BY ts DESC LIMIT 1;", -1, &st, nil)
+            var omitir = false
             if sqlite3_step(st) == SQLITE_ROW {
-                let s = sqlite3_column_double(st, 0), w = sqlite3_column_double(st, 1), f = sqlite3_column_double(st, 2)
-                igual = s == (e.sesion?.porcentaje ?? -1)
-                    && w == (e.semanal?.porcentaje ?? -1)
-                    && f == (e.frontera?.porcentaje ?? -1)
+                let ultimo = sqlite3_column_int64(st, 0)
+                let s = sqlite3_column_double(st, 1), w = sqlite3_column_double(st, 2), f = sqlite3_column_double(st, 3)
+                // Ya guardada (o hay una más nueva), o no cambió nada.
+                omitir = ultimo >= ts
+                    || (s == (e.sesion?.porcentaje ?? -1)
+                        && w == (e.semanal?.porcentaje ?? -1)
+                        && f == (e.frontera?.porcentaje ?? -1))
             }
             sqlite3_finalize(st)
-            if igual { return }
+            if omitir { return }
 
             var ins: OpaquePointer?
             sqlite3_prepare_v2(db, """
@@ -312,7 +321,7 @@ final class Almacen: @unchecked Sendable {
             (ts,plan,sesion_pct,sesion_reset,semanal_pct,semanal_reset,frontera_pct,frontera_modelo,frontera_reset)
             VALUES(?,?,?,?,?,?,?,?,?);
             """, -1, &ins, nil)
-            sqlite3_bind_int64(ins, 1, Int64(Date().timeIntervalSince1970))
+            sqlite3_bind_int64(ins, 1, ts)
             sqlite3_bind_text(ins, 2, e.plan, -1, TRANSIENT)
             sqlite3_bind_double(ins, 3, e.sesion?.porcentaje ?? -1)
             sqlite3_bind_text(ins, 4, e.sesion?.reinicia.map { iso.string(from: $0) } ?? "", -1, TRANSIENT)

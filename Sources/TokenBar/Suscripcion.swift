@@ -2,9 +2,11 @@ import Foundation
 
 /// Lee el estado del plan desde ~/.claude.json.
 ///
-/// Claude Code guarda ahí (`cachedUsageUtilization`) los porcentajes que vienen
-/// en las cabeceras de la API y los refresca cada ~5 min mientras hay una sesión
-/// viva. Leer ese archivo evita tocar credenciales o llamar a la API por fuera.
+/// Claude Code deja ahí (`cachedUsageUtilization`) la última respuesta del
+/// endpoint de uso —pero solo la escribe cuando alguien abre `/usage` o un
+/// panel de editor se lo pide; la CLI sola no lo refresca nunca—. Por eso esta
+/// lectura es el respaldo, y el dato vivo lo trae `LectorMedidor`. El parser
+/// del bloque `utilization` es el mismo para ambos: es el mismo objeto.
 final class LectorSuscripcion: @unchecked Sendable {
     static let archivo = FileManager.default.homeDirectoryForCurrentUser
         .appendingPathComponent(".claude.json")
@@ -41,23 +43,11 @@ final class LectorSuscripcion: @unchecked Sendable {
             if let ms = cache["fetchedAtMs"] as? Double {
                 estado.leidoEn = Date(timeIntervalSince1970: ms / 1000)
             }
-            if let u = cache["utilization"] as? [String: Any] {
-                estado.sesion = ventana(u["five_hour"], etiqueta: "Sesión (5 h)")
-                estado.semanal = ventana(u["seven_day"], etiqueta: "Semanal")
-
-                // El límite por modelo llega en `limits` como weekly_scoped; es
-                // el que primero se agota cuando se trabaja con el modelo
-                // frontera (hoy Fable/Opus según la cuenta).
-                if let limites = u["limits"] as? [[String: Any]] {
-                    for l in limites where (l["kind"] as? String) == "weekly_scoped" {
-                        let modelo = ((l["scope"] as? [String: Any])?["model"] as? [String: Any])?["display_name"] as? String
-                        estado.frontera = Ventana(
-                            porcentaje: (l["percent"] as? NSNumber)?.doubleValue,
-                            reinicia: fecha(l["resets_at"] as? String),
-                            etiqueta: modelo ?? "Modelo frontera")
-                        break
-                    }
-                }
+            if let u = cache["utilization"] as? [String: Any],
+               let ventanas = Self.estado(utilization: u) {
+                estado.sesion = ventanas.sesion
+                estado.semanal = ventanas.semanal
+                estado.frontera = ventanas.frontera
             }
         }
 
@@ -66,7 +56,30 @@ final class LectorSuscripcion: @unchecked Sendable {
         return estado
     }
 
-    private func ventana(_ crudo: Any?, etiqueta: String) -> Ventana? {
+    /// Las tres ventanas a partir del objeto `utilization`, venga del archivo o
+    /// directo del endpoint. `nil` si no trae ninguna.
+    static func estado(utilization u: [String: Any]) -> EstadoSuscripcion? {
+        var estado = EstadoSuscripcion()
+        estado.sesion = ventana(u["five_hour"], etiqueta: "Sesión (5 h)")
+        estado.semanal = ventana(u["seven_day"], etiqueta: "Semanal")
+
+        // El límite por modelo llega en `limits` como weekly_scoped; es el que
+        // primero se agota cuando se trabaja con el modelo frontera (hoy
+        // Fable/Opus según la cuenta).
+        if let limites = u["limits"] as? [[String: Any]] {
+            for l in limites where (l["kind"] as? String) == "weekly_scoped" {
+                let modelo = ((l["scope"] as? [String: Any])?["model"] as? [String: Any])?["display_name"] as? String
+                estado.frontera = Ventana(
+                    porcentaje: (l["percent"] as? NSNumber)?.doubleValue,
+                    reinicia: fecha(l["resets_at"] as? String),
+                    etiqueta: modelo ?? "Modelo frontera")
+                break
+            }
+        }
+        return estado.vacio ? nil : estado
+    }
+
+    private static func ventana(_ crudo: Any?, etiqueta: String) -> Ventana? {
         guard let d = crudo as? [String: Any],
               let pct = (d["utilization"] as? NSNumber)?.doubleValue else { return nil }
         return Ventana(porcentaje: pct, reinicia: fecha(d["resets_at"] as? String), etiqueta: etiqueta)
@@ -78,7 +91,7 @@ final class LectorSuscripcion: @unchecked Sendable {
         return f
     }()
 
-    private func fecha(_ s: String?) -> Date? {
+    private static func fecha(_ s: String?) -> Date? {
         guard let s else { return nil }
         if let d = Self.iso.date(from: s) { return d }
         // Los timestamps traen microsegundos (6 dígitos) y el parser estricto
