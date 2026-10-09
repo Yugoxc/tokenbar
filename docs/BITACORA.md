@@ -11,6 +11,14 @@ Entrada nueva SIEMPRE al inicio. Plantilla:
 **Pendiente**: <lo que quedó fuera, o "nada">
 ```
 
+## 2026-10-09 — README para instalación y funcionamiento (el repo pasó a público)
+
+**Qué**: `README.md` nuevo: qué muestra, requisitos (macOS 14+, Swift, Claude Code), instalación con `scripts/instalar.sh`, desinstalación, cómo funciona (fuentes, dedup, medidor en línea y respaldo), privacidad, desarrollo y limitaciones. `CLAUDE.md` suma el README al mapa de docs.
+**Por qué**: el repositorio se hizo público y no tenía ninguna puerta de entrada para quien no conoce el proyecto.
+**Cómo verificar**: abrir `README.md` en GitHub; los comandos son los de `CLAUDE.md`.
+**Docs**: `README.md` (nuevo), `CLAUDE.md` (mapa de docs).
+**Pendiente**: licencia (sin `LICENSE`, por defecto nadie puede reutilizar el código); capturas de pantalla del panel; el Info.plist dice «Uso interno» en `NSHumanReadableCopyright`.
+
 ## 2026-09-18 — v1.11.0: el medidor del plan se lee de la API cada 15 min; el «congelado» era que nadie lo pedía
 
 **Qué**: TokenBar le pregunta el medidor del plan directo a

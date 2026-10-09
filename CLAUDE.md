@@ -28,6 +28,7 @@ el doc y regístralo en la bitácora como entrada propia.
 | Doc | Qué responde | Actualízalo cuando… |
 |---|---|---|
 | `docs/BITACORA.md` | Qué cambió, cuándo y por qué | SIEMPRE — cada cambio deja entrada |
+| `README.md` | Qué es, cómo instalarlo y cómo funciona (cara pública del repo) | Cambia la instalación, los requisitos, las fuentes de datos, la privacidad o las limitaciones |
 
 ## De dónde salen los datos (lo esencial)
 
